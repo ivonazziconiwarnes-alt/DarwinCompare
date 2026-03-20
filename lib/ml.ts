@@ -1,4 +1,4 @@
-import * as cheerio from 'cheerio'
+import { chromium } from 'playwright-core'
 
 export type ListingRow = {
   role: 'mine' | 'competitor'
@@ -18,6 +18,17 @@ export type ComparePayload = {
   myName?: string
   myUrl: string
   competitors: Array<{ name?: string; url: string }>
+}
+
+type BrowserExtract = {
+  finalUrl: string
+  title: string | null
+  price: number | null
+  currency: string | null
+  imageUrl: string | null
+  itemId: string | null
+  blocked: boolean
+  blockedReason: string | null
 }
 
 export function extractItemId(text: string): string | null {
@@ -72,13 +83,14 @@ function parseMoney(raw: string | null | undefined): number | null {
   return Number.isFinite(value) ? value : null
 }
 
-function cleanupTitle(title: string | null): string | null {
-  if (!title) return null
-
-  return title
-    .replace(/\s*\|\s*Mercado Libre.*$/i, '')
-    .replace(/\s*-\s*\$\s*[\d\.,]+.*$/i, '')
-    .trim()
+function normalizeUrl(rawUrl: string): string {
+  try {
+    const url = new URL(rawUrl)
+    url.hash = ''
+    return url.toString()
+  } catch {
+    return rawUrl.trim()
+  }
 }
 
 function decodeGoUrl(rawUrl: string): string | null {
@@ -92,14 +104,13 @@ function decodeGoUrl(rawUrl: string): string | null {
   }
 }
 
-function normalizeUrl(rawUrl: string): string {
-  try {
-    const url = new URL(rawUrl)
-    url.hash = ''
-    return url.toString()
-  } catch {
-    return rawUrl.trim()
-  }
+function cleanupTitle(title: string | null): string | null {
+  if (!title) return null
+
+  return title
+    .replace(/\s*\|\s*Mercado Libre.*$/i, '')
+    .replace(/\s*-\s*\$\s*[\d\.,]+.*$/i, '')
+    .trim()
 }
 
 function candidateUrls(rawUrl: string): string[] {
@@ -120,137 +131,178 @@ function candidateUrls(rawUrl: string): string[] {
   return [...new Set(list.filter(Boolean))]
 }
 
-async function fetchHtml(url: string): Promise<{ finalUrl: string; html: string }> {
-  const res = await fetch(url, {
-    headers: {
-      'User-Agent':
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36',
-      Accept:
-        'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-      'Accept-Language': 'es-AR,es;q=0.9,en;q=0.8',
-      'Cache-Control': 'no-cache',
-      Pragma: 'no-cache',
-      'Upgrade-Insecure-Requests': '1',
-      DNT: '1',
-    },
-    redirect: 'follow',
-    cache: 'no-store',
+function getBrowserlessWsUrl() {
+  const token = process.env.BROWSERLESS_TOKEN
+  const region = process.env.BROWSERLESS_REGION || 'production-sfo'
+
+  if (!token) {
+    throw new Error('Falta BROWSERLESS_TOKEN en variables de entorno.')
+  }
+
+  return `wss://${region}.browserless.io/?token=${token}`
+}
+
+async function extractWithBrowser(url: string): Promise<BrowserExtract> {
+  const browser = await chromium.connectOverCDP(getBrowserlessWsUrl())
+  const context = await browser.newContext({
+    viewport: { width: 1440, height: 1200 },
+    userAgent:
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36',
+    locale: 'es-AR',
   })
 
-  if (!res.ok) {
-    throw new Error(`HTTP ${res.status}`)
-  }
+  const page = await context.newPage()
 
-  const html = await res.text()
-  return { finalUrl: res.url, html }
-}
+  try {
+    await page.goto(url, {
+      waitUntil: 'domcontentloaded',
+      timeout: 45000,
+    })
 
-function metaContent($: cheerio.CheerioAPI, key: string): string | null {
-  const selectors = [`meta[property="${key}"]`, `meta[name="${key}"]`, `meta[itemprop="${key}"]`]
-  for (const sel of selectors) {
-    const value = $(sel).attr('content')
-    if (value) return value.trim()
-  }
-  return null
-}
+    await page.waitForTimeout(2500)
 
-function findFromJsonLd($: cheerio.CheerioAPI) {
-  let title: string | null = null
-  let price: number | null = null
-  let currency: string | null = null
-  let imageUrl: string | null = null
+    const finalUrl = page.url()
+    const bodyText = ((await page.textContent('body')) || '').replace(/\s+/g, ' ').trim().toLowerCase()
 
-  $('script[type="application/ld+json"]').each((_, el) => {
-    if (title && price !== null && currency) return
+    const blockedPatterns = [
+      'para continuar, ingresa a tu cuenta',
+      'para continuar, ingresá a tu cuenta',
+      'ya tengo cuenta',
+      'soy nuevo',
+      'account verification',
+      'ingresa a tu cuenta',
+      'ingresá a tu cuenta',
+    ]
 
-    const raw = $(el).contents().text().trim()
-    if (!raw) return
-
-    try {
-      const data = JSON.parse(raw)
-      const stack: unknown[] = [data]
-
-      while (stack.length) {
-        const current = stack.pop()
-        if (!current) continue
-
-        if (Array.isArray(current)) {
-          stack.push(...current)
-          continue
-        }
-
-        if (typeof current !== 'object') continue
-
-        const obj = current as Record<string, unknown>
-
-        if (!title && typeof obj.name === 'string') title = obj.name
-        if (price === null && typeof obj.price !== 'undefined') price = parseMoney(String(obj.price))
-        if (!currency && typeof obj.priceCurrency === 'string') currency = obj.priceCurrency
-
-        if (!imageUrl) {
-          if (typeof obj.image === 'string') imageUrl = obj.image
-          if (Array.isArray(obj.image) && typeof obj.image[0] === 'string') imageUrl = obj.image[0]
-        }
-
-        for (const value of Object.values(obj)) stack.push(value)
+    if (
+      finalUrl.toLowerCase().includes('/gz/account-verification') ||
+      finalUrl.toLowerCase().includes('/registration') ||
+      finalUrl.toLowerCase().includes('/login') ||
+      blockedPatterns.some((pattern) => bodyText.includes(pattern))
+    ) {
+      return {
+        finalUrl,
+        title: null,
+        price: null,
+        currency: null,
+        imageUrl: null,
+        itemId: extractItemId(finalUrl) || extractItemId(url),
+        blocked: true,
+        blockedReason: 'Mercado Libre devolvió una pantalla de verificación/login',
       }
-    } catch {}
-  })
+    }
 
-  return { title, price, currency, imageUrl }
-}
+    const data = await page.evaluate(() => {
+      const getMeta = (key: string) => {
+        const selectors = [
+          `meta[property="${key}"]`,
+          `meta[name="${key}"]`,
+          `meta[itemprop="${key}"]`,
+        ]
+        for (const selector of selectors) {
+          const el = document.querySelector(selector)
+          const value = el?.getAttribute('content')
+          if (value) return value.trim()
+        }
+        return null
+      }
 
-function findPriceFromVisibleHtml($: cheerio.CheerioAPI): number | null {
-  const selectors = [
-    '[itemprop="price"]',
-    'meta[itemprop="price"]',
-    '[data-testid="price-part"]',
-    '.andes-money-amount__fraction',
-  ]
+      const ldJsonNodes = Array.from(document.querySelectorAll('script[type="application/ld+json"]'))
 
-  for (const selector of selectors) {
-    const el = $(selector).first()
-    if (!el || !el.length) continue
+      let ldTitle: string | null = null
+      let ldPrice: string | null = null
+      let ldCurrency: string | null = null
+      let ldImage: string | null = null
 
-    const content = el.attr('content') || el.text()
-    const value = parseMoney(content)
-    if (value !== null) return value
+      const walk = (value: any) => {
+        if (!value) return
+
+        if (Array.isArray(value)) {
+          for (const item of value) walk(item)
+          return
+        }
+
+        if (typeof value !== 'object') return
+
+        if (!ldTitle && typeof value.name === 'string') ldTitle = value.name
+        if (!ldPrice && typeof value.price !== 'undefined') ldPrice = String(value.price)
+        if (!ldCurrency && typeof value.priceCurrency === 'string') ldCurrency = value.priceCurrency
+
+        if (!ldImage) {
+          if (typeof value.image === 'string') ldImage = value.image
+          if (Array.isArray(value.image) && typeof value.image[0] === 'string') ldImage = value.image[0]
+        }
+
+        for (const child of Object.values(value)) walk(child)
+      }
+
+      for (const node of ldJsonNodes) {
+        const raw = node.textContent?.trim()
+        if (!raw) continue
+        try {
+          const parsed = JSON.parse(raw)
+          walk(parsed)
+        } catch {}
+      }
+
+      const visiblePriceCandidates = [
+        document.querySelector('[itemprop="price"]')?.getAttribute('content'),
+        document.querySelector('meta[itemprop="price"]')?.getAttribute('content'),
+        document.querySelector('[data-testid="price-part"]')?.textContent,
+        document.querySelector('.andes-money-amount__fraction')?.textContent,
+      ].filter(Boolean)
+
+      const title =
+        getMeta('og:title') ||
+        getMeta('twitter:title') ||
+        document.title ||
+        ldTitle ||
+        null
+
+      const price =
+        getMeta('product:price:amount') ||
+        getMeta('price') ||
+        ldPrice ||
+        visiblePriceCandidates[0] ||
+        null
+
+      const currency =
+        getMeta('product:price:currency') ||
+        getMeta('priceCurrency') ||
+        ldCurrency ||
+        'ARS'
+
+      const imageUrl =
+        getMeta('og:image') ||
+        getMeta('twitter:image') ||
+        ldImage ||
+        null
+
+      return {
+        title,
+        price,
+        currency,
+        imageUrl,
+        html: document.documentElement.innerHTML,
+      }
+    })
+
+    const itemId = extractItemId(finalUrl) || extractItemId(url) || extractItemId(data.html)
+
+    return {
+      finalUrl,
+      title: cleanupTitle(data.title),
+      price: parseMoney(data.price),
+      currency: data.currency || 'ARS',
+      imageUrl: data.imageUrl,
+      itemId,
+      blocked: false,
+      blockedReason: null,
+    }
+  } finally {
+    await context.close()
+    await browser.close()
   }
-
-  return null
-}
-
-function isVerificationOrBlockedPage($: cheerio.CheerioAPI, finalUrl: string, html: string) {
-  const pageText = $('body').text().replace(/\s+/g, ' ').trim().toLowerCase()
-  const pageTitle = $('title').text().trim().toLowerCase()
-  const finalLower = finalUrl.toLowerCase()
-
-  if (finalLower.includes('/gz/account-verification')) return true
-  if (finalLower.includes('/registration') || finalLower.includes('/login')) return true
-
-  const patterns = [
-    'para continuar, ingresa a tu cuenta',
-    'para continuar, ingresá a tu cuenta',
-    'ya tengo cuenta',
-    'soy nuevo',
-    'account verification',
-    'account-verification',
-    'ingresa a tu cuenta',
-    'ingresá a tu cuenta',
-  ]
-
-  if (patterns.some((pattern) => pageText.includes(pattern))) return true
-  if (patterns.some((pattern) => pageTitle.includes(pattern))) return true
-
-  if (html.toLowerCase().includes('/gz/account-verification')) return true
-
-  return false
-}
-
-function isGenericMercadoLibreTitle(title: string | null) {
-  if (!title) return false
-  const t = title.trim().toLowerCase()
-  return t === 'mercado libre' || t === 'mercadolibre' || t === 'publicación' || t === 'publicacion'
 }
 
 export async function scrapeListing(
@@ -263,63 +315,27 @@ export async function scrapeListing(
 
   for (const candidate of tries) {
     try {
-      const { html, finalUrl } = await fetchHtml(candidate)
-      const $ = cheerio.load(html)
+      const result = await extractWithBrowser(candidate)
 
-      if (isVerificationOrBlockedPage($, finalUrl, html)) {
-        lastError = 'Mercado Libre devolvió una pantalla de verificación/login'
+      if (result.blocked) {
+        lastError = result.blockedReason || 'Mercado Libre devolvió bloqueo'
         continue
       }
 
-      const itemId = extractItemId(url) || extractItemId(finalUrl) || extractItemId(html)
-
-      const rawTitle =
-        metaContent($, 'og:title') ||
-        metaContent($, 'twitter:title') ||
-        $('title').text() ||
-        null
-
-      const rawPrice =
-        metaContent($, 'product:price:amount') ||
-        metaContent($, 'price') ||
-        null
-
-      const rawCurrency =
-        metaContent($, 'product:price:currency') ||
-        metaContent($, 'priceCurrency') ||
-        null
-
-      const rawImage =
-        metaContent($, 'og:image') ||
-        metaContent($, 'twitter:image') ||
-        null
-
-      const ld = findFromJsonLd($)
-
-      const finalTitle = cleanupTitle(rawTitle || ld.title)
-      const finalPrice = parseMoney(rawPrice) ?? ld.price ?? findPriceFromVisibleHtml($)
-      const finalCurrency = rawCurrency || ld.currency || 'ARS'
-      const finalImage = rawImage || ld.imageUrl || null
-
-      if (isGenericMercadoLibreTitle(finalTitle) && finalPrice === null) {
-        lastError = 'Mercado Libre devolvió una página genérica sin datos del producto'
-        continue
-      }
-
-      if (!finalTitle && finalPrice === null) {
-        lastError = 'HTML sin título ni precio'
+      if (!result.title && result.price === null) {
+        lastError = 'Página sin título ni precio'
         continue
       }
 
       return {
         role,
         name: fallbackName,
-        url: candidate,
-        itemId,
-        title: finalTitle,
-        price: finalPrice,
-        currency: finalCurrency,
-        imageUrl: finalImage,
+        url: result.finalUrl || candidate,
+        itemId: result.itemId,
+        title: result.title,
+        price: result.price,
+        currency: result.currency,
+        imageUrl: result.imageUrl,
         source: 'web',
       }
     } catch (error) {
