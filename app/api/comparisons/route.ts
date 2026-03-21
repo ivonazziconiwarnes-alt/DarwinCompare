@@ -3,6 +3,16 @@ import { isAuthenticatedRequest } from '@/lib/auth'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import type { ComparisonRecord, CompetitorRecord, SavedComparison } from '@/lib/types'
 
+function emptyManual() {
+  return {
+    title: '',
+    price: '',
+    itemId: '',
+    imageUrl: '',
+    currency: 'ARS',
+  }
+}
+
 function mapComparison(record: ComparisonRecord, competitors: CompetitorRecord[]): SavedComparison {
   return {
     id: record.id,
@@ -10,6 +20,7 @@ function mapComparison(record: ComparisonRecord, competitors: CompetitorRecord[]
     category: record.category,
     myName: record.my_name,
     myUrl: record.my_url,
+    myManual: record.my_manual || emptyManual(),
     createdAt: record.created_at,
     updatedAt: record.updated_at,
     lastResult: record.last_result,
@@ -20,6 +31,7 @@ function mapComparison(record: ComparisonRecord, competitors: CompetitorRecord[]
         name: competitor.name,
         url: competitor.url,
         position: competitor.position,
+        manualOverride: competitor.manual_override || emptyManual(),
       })),
   }
 }
@@ -54,7 +66,7 @@ async function fetchComparisons() {
     })
   }
 
-  return (comparisonRows || []).map((row) => mapComparison(row, competitorsByComparison.get(row.id) || []))
+  return (comparisonRows || []).map((row) => mapComparison(row as ComparisonRecord, competitorsByComparison.get(row.id) || []))
 }
 
 export async function GET(request: Request) {
@@ -87,6 +99,7 @@ export async function POST(request: Request) {
       category: body.category?.trim() || 'General',
       my_name: body.myName?.trim() || 'Mi publicación',
       my_url: body.myUrl?.trim() || '',
+      my_manual: body.myManual ?? emptyManual(),
       last_result: body.lastResult ?? null,
     }
 
@@ -104,6 +117,7 @@ export async function POST(request: Request) {
         name: competitor.name?.trim() || `Competidor ${index + 1}`,
         url: competitor.url?.trim() || '',
         position: typeof competitor.position === 'number' ? competitor.position : index,
+        manual_override: competitor.manualOverride ?? emptyManual(),
       }))
       .filter((competitor) => competitor.url)
 
@@ -114,11 +128,12 @@ export async function POST(request: Request) {
         .insert(competitors)
         .select('*')
         .order('position', { ascending: true })
+
       if (error) throw error
-      competitorRows = data || []
+      competitorRows = (data || []) as CompetitorRecord[]
     }
 
-    return NextResponse.json({ item: mapComparison(created, competitorRows) }, { status: 201 })
+    return NextResponse.json({ item: mapComparison(created as ComparisonRecord, competitorRows) }, { status: 201 })
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'No se pudo crear la comparación.' },

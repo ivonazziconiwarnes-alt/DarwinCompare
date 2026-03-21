@@ -1,4 +1,5 @@
 import { chromium } from 'playwright-core'
+import type { ManualOverride } from './types'
 
 export type ListingRow = {
   role: 'mine' | 'competitor'
@@ -9,7 +10,7 @@ export type ListingRow = {
   price: number | null
   currency: string | null
   imageUrl: string | null
-  source: 'web'
+  source: 'web' | 'manual'
   error?: string
 }
 
@@ -17,7 +18,8 @@ export type ComparePayload = {
   comparisonName: string
   myName?: string
   myUrl: string
-  competitors: Array<{ name?: string; url: string }>
+  myManual?: ManualOverride
+  competitors: Array<{ name?: string; url: string; manualOverride?: ManualOverride }>
 }
 
 type BrowserExtract = {
@@ -53,8 +55,12 @@ export function extractItemId(text: string): string | null {
   return null
 }
 
-function parseMoney(raw: string | null | undefined): number | null {
-  if (!raw) return null
+function parseMoney(raw: string | number | null | undefined): number | null {
+  if (raw === null || typeof raw === 'undefined') return null
+
+  if (typeof raw === 'number') {
+    return Number.isFinite(raw) ? raw : null
+  }
 
   const cleaned = raw.replace(/\u00a0/g, ' ').trim()
 
@@ -194,11 +200,7 @@ async function extractWithBrowser(url: string): Promise<BrowserExtract> {
 
     const data = await page.evaluate(() => {
       const getMeta = (key: string) => {
-        const selectors = [
-          `meta[property="${key}"]`,
-          `meta[name="${key}"]`,
-          `meta[itemprop="${key}"]`,
-        ]
+        const selectors = [`meta[property="${key}"]`, `meta[name="${key}"]`, `meta[itemprop="${key}"]`]
         for (const selector of selectors) {
           const el = document.querySelector(selector)
           const value = el?.getAttribute('content')
@@ -355,6 +357,51 @@ export async function scrapeListing(
     source: 'web',
     error: lastError,
   }
+}
+
+function normalizeManual(override?: ManualOverride | null) {
+  const title = override?.title?.trim() || null
+  const price = parseMoney(override?.price ?? null)
+  const itemId = override?.itemId?.trim() || null
+  const imageUrl = override?.imageUrl?.trim() || null
+  const currency = override?.currency?.trim() || 'ARS'
+
+  return { title, price, itemId, imageUrl, currency }
+}
+
+function hasManualData(override?: ManualOverride | null) {
+  const manual = normalizeManual(override)
+  return !!(manual.title || manual.price !== null || manual.itemId || manual.imageUrl)
+}
+
+export function applyManualOverride(scraped: ListingRow, override?: ManualOverride | null): ListingRow {
+  if (!hasManualData(override)) return scraped
+
+  const manual = normalizeManual(override)
+
+  const merged: ListingRow = {
+    ...scraped,
+    title: scraped.title || manual.title,
+    price: scraped.price ?? manual.price,
+    currency: scraped.currency || manual.currency,
+    itemId: scraped.itemId || manual.itemId,
+    imageUrl: scraped.imageUrl || manual.imageUrl,
+  }
+
+  const useManualAsSource =
+    !!scraped.error ||
+    scraped.price === null ||
+    !scraped.title
+
+  if (useManualAsSource && (manual.title || manual.price !== null || manual.itemId || manual.imageUrl)) {
+    return {
+      ...merged,
+      source: 'manual',
+      error: undefined,
+    }
+  }
+
+  return merged
 }
 
 export function computeRows(payload: ComparePayload, listings: ListingRow[]) {

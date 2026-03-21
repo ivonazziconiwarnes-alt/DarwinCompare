@@ -1,4 +1,20 @@
-export type Row = {
+export type ManualOverride = {
+  title: string
+  price: string
+  itemId: string
+  imageUrl: string
+  currency: string
+}
+
+export type CompetitorInput = {
+  id: string
+  name: string
+  url: string
+  position: number
+  manualOverride: ManualOverride
+}
+
+export type CompareRow = {
   role: 'mine' | 'competitor'
   name: string
   url: string
@@ -7,7 +23,7 @@ export type Row = {
   price: number | null
   currency: string | null
   imageUrl: string | null
-  source: 'web'
+  source: 'web' | 'manual'
   error?: string
   diff?: number | null
   pct?: number | null
@@ -15,7 +31,7 @@ export type Row = {
 
 export type CompareResponse = {
   comparisonName: string
-  rows: Row[]
+  rows: CompareRow[]
   summary: {
     total: number
     ok: number
@@ -25,23 +41,17 @@ export type CompareResponse = {
   error?: string
 }
 
-export type CompetitorInput = {
-  id: string
-  name: string
-  url: string
-  position: number
-}
-
 export type SavedComparison = {
   id: string
   name: string
   category: string
   myName: string
   myUrl: string
+  myManual: ManualOverride
   competitors: CompetitorInput[]
   createdAt: string
   updatedAt: string
-  lastResult?: CompareResponse | null
+  lastResult: CompareResponse | null
 }
 
 export type ComparisonRecord = {
@@ -50,6 +60,7 @@ export type ComparisonRecord = {
   category: string
   my_name: string
   my_url: string
+  my_manual: ManualOverride | null
   last_result: CompareResponse | null
   created_at: string
   updated_at: string
@@ -61,4 +72,6 @@ export type CompetitorRecord = {
   name: string
   url: string
   position: number
+  manual_override: ManualOverride | null
+  created_at: string
 }

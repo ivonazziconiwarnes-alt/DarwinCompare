@@ -3,6 +3,16 @@ import { isAuthenticatedRequest } from '@/lib/auth'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import type { ComparisonRecord, CompetitorRecord, SavedComparison } from '@/lib/types'
 
+function emptyManual() {
+  return {
+    title: '',
+    price: '',
+    itemId: '',
+    imageUrl: '',
+    currency: 'ARS',
+  }
+}
+
 function mapComparison(record: ComparisonRecord, competitors: CompetitorRecord[]): SavedComparison {
   return {
     id: record.id,
@@ -10,6 +20,7 @@ function mapComparison(record: ComparisonRecord, competitors: CompetitorRecord[]
     category: record.category,
     myName: record.my_name,
     myUrl: record.my_url,
+    myManual: record.my_manual || emptyManual(),
     createdAt: record.created_at,
     updatedAt: record.updated_at,
     lastResult: record.last_result,
@@ -20,6 +31,7 @@ function mapComparison(record: ComparisonRecord, competitors: CompetitorRecord[]
         name: competitor.name,
         url: competitor.url,
         position: competitor.position,
+        manualOverride: competitor.manual_override || emptyManual(),
       })),
   }
 }
@@ -43,7 +55,7 @@ async function readOne(id: string) {
 
   if (competitorError) throw competitorError
 
-  return mapComparison(comparisonRow, competitorRows || [])
+  return mapComparison(comparisonRow as ComparisonRecord, (competitorRows || []) as CompetitorRecord[])
 }
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -78,6 +90,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       category: body.category?.trim() || 'General',
       my_name: body.myName?.trim() || 'Mi publicación',
       my_url: body.myUrl?.trim() || '',
+      my_manual: body.myManual ?? emptyManual(),
       last_result: body.lastResult ?? null,
       updated_at: new Date().toISOString(),
     }
@@ -104,6 +117,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         name: competitor.name?.trim() || `Competidor ${index + 1}`,
         url: competitor.url?.trim() || '',
         position: typeof competitor.position === 'number' ? competitor.position : index,
+        manual_override: competitor.manualOverride ?? emptyManual(),
       }))
       .filter((competitor) => competitor.url)
 
@@ -114,11 +128,12 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         .insert(competitors)
         .select('*')
         .order('position', { ascending: true })
+
       if (error) throw error
-      competitorRows = data || []
+      competitorRows = (data || []) as CompetitorRecord[]
     }
 
-    return NextResponse.json({ item: mapComparison(updated, competitorRows) })
+    return NextResponse.json({ item: mapComparison(updated as ComparisonRecord, competitorRows) })
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'No se pudo actualizar la comparación.' },

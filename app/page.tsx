@@ -19,15 +19,25 @@ import {
   Trash2,
   X,
 } from 'lucide-react'
-import type { CompareResponse, CompetitorInput, SavedComparison } from '@/lib/types'
+import type { CompareResponse, CompetitorInput, ManualOverride, SavedComparison } from '@/lib/types'
 
 function uid() {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID()
   return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
 }
 
+function emptyManual(): ManualOverride {
+  return {
+    title: '',
+    price: '',
+    itemId: '',
+    imageUrl: '',
+    currency: 'ARS',
+  }
+}
+
 function emptyCompetitor(position: number): CompetitorInput {
-  return { id: uid(), name: '', url: '', position }
+  return { id: uid(), name: '', url: '', position, manualOverride: emptyManual() }
 }
 
 function emptyComparison(): SavedComparison {
@@ -38,10 +48,33 @@ function emptyComparison(): SavedComparison {
     category: 'General',
     myName: 'Mi publicación',
     myUrl: '',
+    myManual: emptyManual(),
     competitors: [emptyCompetitor(0), emptyCompetitor(1)],
     createdAt: now,
     updatedAt: now,
     lastResult: null,
+  }
+}
+
+function hydrateManual(value?: Partial<ManualOverride> | null): ManualOverride {
+  return {
+    title: value?.title || '',
+    price: value?.price || '',
+    itemId: value?.itemId || '',
+    imageUrl: value?.imageUrl || '',
+    currency: value?.currency || 'ARS',
+  }
+}
+
+function hydrateComparison(value: SavedComparison): SavedComparison {
+  return {
+    ...value,
+    myManual: hydrateManual(value.myManual),
+    competitors: (value.competitors || []).map((competitor, index) => ({
+      ...competitor,
+      position: typeof competitor.position === 'number' ? competitor.position : index,
+      manualOverride: hydrateManual(competitor.manualOverride),
+    })),
   }
 }
 
@@ -124,7 +157,7 @@ export default function HomePage() {
 
       const json = await res.json()
       if (!res.ok) throw new Error(json.error || 'No se pudieron leer las comparaciones.')
-      const next = json.items as SavedComparison[]
+      const next = (json.items as SavedComparison[]).map(hydrateComparison)
       setItems(next)
 
       if (next.length) {
@@ -169,7 +202,9 @@ export default function HomePage() {
   function updateSelected(updater: (current: SavedComparison) => SavedComparison) {
     if (!selected) return
     setItems((prev) =>
-      prev.map((item) => (item.id === selected.id ? updater({ ...item, updatedAt: new Date().toISOString() }) : item)),
+      prev.map((item) =>
+        item.id === selected.id ? hydrateComparison(updater({ ...item, updatedAt: new Date().toISOString() })) : item,
+      ),
     )
     markDirty(selected.id)
   }
@@ -228,7 +263,7 @@ export default function HomePage() {
 
       const json = await res.json()
       if (!res.ok) throw new Error(json.error || 'No se pudo crear la comparación.')
-      const item = json.item as SavedComparison
+      const item = hydrateComparison(json.item as SavedComparison)
       setItems((prev) => [item, ...prev])
       setSelectedId(item.id)
       setShowEditor(true)
@@ -258,7 +293,7 @@ export default function HomePage() {
 
       const json = await res.json()
       if (!res.ok) throw new Error(json.error || 'No se pudo guardar la comparación.')
-      const item = json.item as SavedComparison
+      const item = hydrateComparison(json.item as SavedComparison)
       setItems((prev) => prev.map((row) => (row.id === item.id ? item : row)))
       clearDirty(item.id)
     } catch (err) {
@@ -279,7 +314,13 @@ export default function HomePage() {
         name: `${selected.name} (copia)`,
         createdAt: now,
         updatedAt: now,
-        competitors: selected.competitors.map((comp, index) => ({ ...comp, id: uid(), position: index })),
+        myManual: { ...selected.myManual },
+        competitors: selected.competitors.map((comp, index) => ({
+          ...comp,
+          id: uid(),
+          position: index,
+          manualOverride: { ...comp.manualOverride },
+        })),
       }
 
       const res = await fetch('/api/comparisons', {
@@ -295,7 +336,7 @@ export default function HomePage() {
 
       const json = await res.json()
       if (!res.ok) throw new Error(json.error || 'No se pudo duplicar la comparación.')
-      const item = json.item as SavedComparison
+      const item = hydrateComparison(json.item as SavedComparison)
       setItems((prev) => [item, ...prev])
       setSelectedId(item.id)
       setShowEditor(true)
@@ -342,13 +383,28 @@ export default function HomePage() {
   function updateCompetitor(id: string, field: 'name' | 'url', value: string) {
     updateSelected((current) => ({
       ...current,
-      competitors: current.competitors.map((comp) => (comp.id === id ? { ...comp, [field]: value } : comp)),
+      competitors: current.competitors.map((comp) =>
+        comp.id === id ? { ...comp, [field]: value } : comp,
+      ),
+    }))
+  }
+
+  function updateCompetitorManual(id: string, field: keyof ManualOverride, value: string) {
+    updateSelected((current) => ({
+      ...current,
+      competitors: current.competitors.map((comp) =>
+        comp.id === id
+          ? { ...comp, manualOverride: { ...hydrateManual(comp.manualOverride), [field]: value } }
+          : comp,
+      ),
     }))
   }
 
   function removeCompetitor(id: string) {
     updateSelected((current) => {
-      const next = current.competitors.filter((comp) => comp.id !== id).map((comp, index) => ({ ...comp, position: index }))
+      const next = current.competitors
+        .filter((comp) => comp.id !== id)
+        .map((comp, index) => ({ ...comp, position: index }))
       return { ...current, competitors: next.length ? next : [emptyCompetitor(0)] }
     })
   }
@@ -360,7 +416,11 @@ export default function HomePage() {
 
     try {
       const competitors = selected.competitors
-        .map((item) => ({ name: item.name.trim() || 'Competidor', url: item.url.trim() }))
+        .map((item) => ({
+          name: item.name.trim() || 'Competidor',
+          url: item.url.trim(),
+          manualOverride: item.manualOverride,
+        }))
         .filter((item) => item.url)
 
       if (!selected.myUrl.trim()) throw new Error('Pegá la URL de tu publicación.')
@@ -373,6 +433,7 @@ export default function HomePage() {
           comparisonName: selected.name,
           myName: selected.myName,
           myUrl: selected.myUrl,
+          myManual: selected.myManual,
           competitors,
         }),
       })
@@ -385,7 +446,12 @@ export default function HomePage() {
       const json = (await res.json()) as CompareResponse
       if (!res.ok) throw new Error(json.error || 'No se pudo comparar.')
 
-      const nextSelected = { ...selected, lastResult: json, updatedAt: new Date().toISOString() }
+      const nextSelected = hydrateComparison({
+        ...selected,
+        lastResult: json,
+        updatedAt: new Date().toISOString(),
+      })
+
       setItems((prev) => prev.map((item) => (item.id === selected.id ? nextSelected : item)))
       await saveComparison(nextSelected)
     } catch (err) {
@@ -694,6 +760,73 @@ export default function HomePage() {
                       </div>
                     </div>
 
+                    <div className="panel-block">
+                      <div className="panel-header">
+                        <div>
+                          <div className="eyebrow">Respaldo manual</div>
+                          <h3>Mi publicación</h3>
+                        </div>
+                      </div>
+
+                      <div className="form-grid">
+                        <div>
+                          <label className="label">Título manual</label>
+                          <input
+                            className="input"
+                            value={selected.myManual.title}
+                            onChange={(e) =>
+                              updateSelected((current) => ({
+                                ...current,
+                                myManual: { ...hydrateManual(current.myManual), title: e.target.value },
+                              }))
+                            }
+                          />
+                        </div>
+
+                        <div>
+                          <label className="label">Precio manual</label>
+                          <input
+                            className="input"
+                            value={selected.myManual.price}
+                            onChange={(e) =>
+                              updateSelected((current) => ({
+                                ...current,
+                                myManual: { ...hydrateManual(current.myManual), price: e.target.value },
+                              }))
+                            }
+                          />
+                        </div>
+
+                        <div>
+                          <label className="label">MLA manual</label>
+                          <input
+                            className="input"
+                            value={selected.myManual.itemId}
+                            onChange={(e) =>
+                              updateSelected((current) => ({
+                                ...current,
+                                myManual: { ...hydrateManual(current.myManual), itemId: e.target.value },
+                              }))
+                            }
+                          />
+                        </div>
+
+                        <div>
+                          <label className="label">URL imagen manual</label>
+                          <input
+                            className="input"
+                            value={selected.myManual.imageUrl}
+                            onChange={(e) =>
+                              updateSelected((current) => ({
+                                ...current,
+                                myManual: { ...hydrateManual(current.myManual), imageUrl: e.target.value },
+                              }))
+                            }
+                          />
+                        </div>
+                      </div>
+                    </div>
+
                     {dirty ? <div className="status-chip">Tenés cambios sin guardar</div> : null}
 
                     <div className="panel-block">
@@ -737,6 +870,53 @@ export default function HomePage() {
                                   value={competitor.url}
                                   onChange={(e) => updateCompetitor(competitor.id, 'url', e.target.value)}
                                 />
+                              </div>
+                            </div>
+
+                            <div className="panel-block" style={{ marginTop: 14 }}>
+                              <div className="panel-header">
+                                <div>
+                                  <div className="eyebrow">Respaldo manual</div>
+                                  <h3 style={{ marginTop: 4 }}>Datos opcionales</h3>
+                                </div>
+                              </div>
+
+                              <div className="form-grid">
+                                <div>
+                                  <label className="label">Título manual</label>
+                                  <input
+                                    className="input"
+                                    value={competitor.manualOverride.title}
+                                    onChange={(e) => updateCompetitorManual(competitor.id, 'title', e.target.value)}
+                                  />
+                                </div>
+
+                                <div>
+                                  <label className="label">Precio manual</label>
+                                  <input
+                                    className="input"
+                                    value={competitor.manualOverride.price}
+                                    onChange={(e) => updateCompetitorManual(competitor.id, 'price', e.target.value)}
+                                  />
+                                </div>
+
+                                <div>
+                                  <label className="label">MLA manual</label>
+                                  <input
+                                    className="input"
+                                    value={competitor.manualOverride.itemId}
+                                    onChange={(e) => updateCompetitorManual(competitor.id, 'itemId', e.target.value)}
+                                  />
+                                </div>
+
+                                <div>
+                                  <label className="label">URL imagen manual</label>
+                                  <input
+                                    className="input"
+                                    value={competitor.manualOverride.imageUrl}
+                                    onChange={(e) => updateCompetitorManual(competitor.id, 'imageUrl', e.target.value)}
+                                  />
+                                </div>
                               </div>
                             </div>
                           </div>

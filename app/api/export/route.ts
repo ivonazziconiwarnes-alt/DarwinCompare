@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { isAuthenticatedRequest } from '@/lib/auth'
+
 import * as XLSX from 'xlsx'
 
 export const maxDuration = 60
@@ -13,7 +14,7 @@ type ExportRow = {
   price: number | null
   currency: string | null
   imageUrl: string | null
-  source: 'web'
+  source: 'web' | 'manual'
   error?: string
   diff?: number | null
   pct?: number | null
@@ -69,9 +70,10 @@ export async function POST(request: Request) {
       Precio: row.price ?? '',
       Diferencia: row.diff ?? '',
       Porcentaje: typeof row.pct === 'number' ? Number(row.pct.toFixed(2)) : '',
+      Fuente: row.source.toUpperCase(),
     }))
     const wsSummary = XLSX.utils.json_to_sheet(summary)
-    wsSummary['!cols'] = [{ wch: 28 }, { wch: 14 }, { wch: 14 }, { wch: 14 }]
+    wsSummary['!cols'] = [{ wch: 28 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }]
     XLSX.utils.book_append_sheet(wb, wsSummary, 'Resumen')
 
     const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' })

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { isAuthenticatedRequest } from '@/lib/auth'
-import { ComparePayload, computeRows, scrapeListing } from '@/lib/ml'
+import { ComparePayload, applyManualOverride, computeRows, scrapeListing } from '@/lib/ml'
 
 export const maxDuration = 60
 
@@ -28,14 +28,18 @@ export async function POST(request: Request) {
 
     const listings = []
 
-    listings.push(await scrapeListing(body.myUrl, 'mine', body.myName?.trim() || 'Mi publicación'))
+    const mineScraped = await scrapeListing(body.myUrl, 'mine', body.myName?.trim() || 'Mi publicación')
+    listings.push(applyManualOverride(mineScraped, body.myManual))
 
     for (let i = 0; i < competitors.length; i++) {
       const item = competitors[i]
       await delay(250)
-      listings.push(
-        await scrapeListing(item.url, 'competitor', item.name?.trim() || `Competidor ${i + 1}`),
+      const scraped = await scrapeListing(
+        item.url,
+        'competitor',
+        item.name?.trim() || `Competidor ${i + 1}`,
       )
+      listings.push(applyManualOverride(scraped, item.manualOverride))
     }
 
     const rows = computeRows(body, listings)
