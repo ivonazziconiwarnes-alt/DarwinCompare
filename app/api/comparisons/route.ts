@@ -24,6 +24,9 @@ function mapComparison(record: ComparisonRecord, competitors: CompetitorRecord[]
     createdAt: record.created_at,
     updatedAt: record.updated_at,
     lastResult: record.last_result,
+    syncStatus: record.sync_status || 'pending',
+    lastSyncedAt: record.last_synced_at || null,
+    syncError: record.sync_error || null,
     competitors: competitors
       .sort((a, b) => a.position - b.position)
       .map((competitor) => ({
@@ -66,7 +69,9 @@ async function fetchComparisons() {
     })
   }
 
-  return (comparisonRows || []).map((row) => mapComparison(row as ComparisonRecord, competitorsByComparison.get(row.id) || []))
+  return (comparisonRows || []).map((row) =>
+    mapComparison(row as ComparisonRecord, competitorsByComparison.get(row.id) || []),
+  )
 }
 
 export async function GET(request: Request) {
@@ -101,6 +106,9 @@ export async function POST(request: Request) {
       my_url: body.myUrl?.trim() || '',
       my_manual: body.myManual ?? emptyManual(),
       last_result: body.lastResult ?? null,
+      sync_status: body.syncStatus ?? 'pending',
+      last_synced_at: body.lastSyncedAt ?? null,
+      sync_error: body.syncError ?? null,
     }
 
     const { data: created, error: createError } = await supabase
@@ -133,7 +141,10 @@ export async function POST(request: Request) {
       competitorRows = (data || []) as CompetitorRecord[]
     }
 
-    return NextResponse.json({ item: mapComparison(created as ComparisonRecord, competitorRows) }, { status: 201 })
+    return NextResponse.json(
+      { item: mapComparison(created as ComparisonRecord, competitorRows) },
+      { status: 201 },
+    )
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'No se pudo crear la comparación.' },

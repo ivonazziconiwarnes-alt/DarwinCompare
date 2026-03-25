@@ -52,6 +52,9 @@ export type SavedComparison = {
   createdAt: string
   updatedAt: string
   lastResult: CompareResponse | null
+  syncStatus: 'pending' | 'ok' | 'error'
+  lastSyncedAt: string | null
+  syncError: string | null
 }
 
 export type ComparisonRecord = {
@@ -64,6 +67,9 @@ export type ComparisonRecord = {
   last_result: CompareResponse | null
   created_at: string
   updated_at: string
+  sync_status: 'pending' | 'ok' | 'error'
+  last_synced_at: string | null
+  sync_error: string | null
 }
 
 export type CompetitorRecord = {

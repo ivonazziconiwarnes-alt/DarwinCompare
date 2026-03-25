@@ -53,6 +53,9 @@ function emptyComparison(): SavedComparison {
     createdAt: now,
     updatedAt: now,
     lastResult: null,
+    syncStatus: 'pending',
+    lastSyncedAt: null,
+    syncError: null,
   }
 }
 
@@ -70,6 +73,9 @@ function hydrateComparison(value: SavedComparison): SavedComparison {
   return {
     ...value,
     myManual: hydrateManual(value.myManual),
+    syncStatus: value.syncStatus || 'pending',
+    lastSyncedAt: value.lastSyncedAt || null,
+    syncError: value.syncError || null,
     competitors: (value.competitors || []).map((competitor, index) => ({
       ...competitor,
       position: typeof competitor.position === 'number' ? competitor.position : index,
@@ -98,6 +104,18 @@ function prettyDate(value: string) {
   } catch {
     return value
   }
+}
+
+function syncLabel(status: 'pending' | 'ok' | 'error') {
+  if (status === 'ok') return 'Actualizada'
+  if (status === 'error') return 'Error'
+  return 'Pendiente'
+}
+
+function syncClass(status: 'pending' | 'ok' | 'error') {
+  if (status === 'ok') return 'sync-ok'
+  if (status === 'error') return 'sync-error'
+  return 'sync-pending'
 }
 
 export default function HomePage() {
@@ -157,6 +175,7 @@ export default function HomePage() {
 
       const json = await res.json()
       if (!res.ok) throw new Error(json.error || 'No se pudieron leer las comparaciones.')
+
       const next = (json.items as SavedComparison[]).map(hydrateComparison)
       setItems(next)
 
@@ -201,11 +220,26 @@ export default function HomePage() {
 
   function updateSelected(updater: (current: SavedComparison) => SavedComparison) {
     if (!selected) return
+
     setItems((prev) =>
-      prev.map((item) =>
-        item.id === selected.id ? hydrateComparison(updater({ ...item, updatedAt: new Date().toISOString() })) : item,
-      ),
+      prev.map((item) => {
+        if (item.id !== selected.id) return item
+
+        const next = hydrateComparison(
+          updater({
+            ...item,
+            updatedAt: new Date().toISOString(),
+          }),
+        )
+
+        return {
+          ...next,
+          syncStatus: 'pending',
+          syncError: null,
+        }
+      }),
     )
+
     markDirty(selected.id)
   }
 
@@ -239,6 +273,7 @@ export default function HomePage() {
     try {
       await fetch('/api/auth/logout', { method: 'POST' })
     } catch {}
+
     setLoggedIn(false)
     setItems([])
     setSelectedId('')
@@ -263,6 +298,7 @@ export default function HomePage() {
 
       const json = await res.json()
       if (!res.ok) throw new Error(json.error || 'No se pudo crear la comparación.')
+
       const item = hydrateComparison(json.item as SavedComparison)
       setItems((prev) => [item, ...prev])
       setSelectedId(item.id)
@@ -279,6 +315,7 @@ export default function HomePage() {
 
     setSaving(true)
     setError(null)
+
     try {
       const res = await fetch(`/api/comparisons/${current.id}`, {
         method: 'PATCH',
@@ -293,6 +330,7 @@ export default function HomePage() {
 
       const json = await res.json()
       if (!res.ok) throw new Error(json.error || 'No se pudo guardar la comparación.')
+
       const item = hydrateComparison(json.item as SavedComparison)
       setItems((prev) => prev.map((row) => (row.id === item.id ? item : row)))
       clearDirty(item.id)
@@ -306,6 +344,7 @@ export default function HomePage() {
   async function duplicateComparison() {
     if (!selected) return
     setError(null)
+
     try {
       const now = new Date().toISOString()
       const copy: SavedComparison = {
@@ -314,6 +353,9 @@ export default function HomePage() {
         name: `${selected.name} (copia)`,
         createdAt: now,
         updatedAt: now,
+        syncStatus: 'pending',
+        lastSyncedAt: null,
+        syncError: null,
         myManual: { ...selected.myManual },
         competitors: selected.competitors.map((comp, index) => ({
           ...comp,
@@ -336,6 +378,7 @@ export default function HomePage() {
 
       const json = await res.json()
       if (!res.ok) throw new Error(json.error || 'No se pudo duplicar la comparación.')
+
       const item = hydrateComparison(json.item as SavedComparison)
       setItems((prev) => [item, ...prev])
       setSelectedId(item.id)
@@ -352,6 +395,7 @@ export default function HomePage() {
     if (!yes) return
 
     setError(null)
+
     try {
       const res = await fetch(`/api/comparisons/${selected.id}`, { method: 'DELETE' })
 
@@ -405,12 +449,14 @@ export default function HomePage() {
       const next = current.competitors
         .filter((comp) => comp.id !== id)
         .map((comp, index) => ({ ...comp, position: index }))
+
       return { ...current, competitors: next.length ? next : [emptyCompetitor(0)] }
     })
   }
 
   async function handleCompare() {
     if (!selected) return
+
     setLoadingCompare(true)
     setError(null)
 
@@ -450,6 +496,9 @@ export default function HomePage() {
         ...selected,
         lastResult: json,
         updatedAt: new Date().toISOString(),
+        syncStatus: 'ok',
+        lastSyncedAt: new Date().toISOString(),
+        syncError: null,
       })
 
       setItems((prev) => prev.map((item) => (item.id === selected.id ? nextSelected : item)))
@@ -610,8 +659,14 @@ export default function HomePage() {
                   </div>
 
                   <div className="saved-title">{item.name}</div>
+
                   <div className="saved-meta">
                     {item.competitors.length} competidor{item.competitors.length === 1 ? '' : 'es'} · {prettyDate(item.updatedAt)}
+                  </div>
+
+                  <div className={`sync-badge ${syncClass(item.syncStatus)}`}>
+                    {syncLabel(item.syncStatus)}
+                    {item.lastSyncedAt ? ` · ${prettyDate(item.lastSyncedAt)}` : ''}
                   </div>
                 </button>
               ))
@@ -637,6 +692,13 @@ export default function HomePage() {
                     ? `${selected.category || 'Sin categoría'} · ${selected.competitors.length} competidor${selected.competitors.length === 1 ? '' : 'es'}`
                     : 'Elegí una comparación o creá una nueva'}
                 </div>
+
+                {selected ? (
+                  <div className={`sync-badge ${syncClass(selected.syncStatus)}`} style={{ marginTop: 8 }}>
+                    {syncLabel(selected.syncStatus)}
+                    {selected.lastSyncedAt ? ` · ${prettyDate(selected.lastSyncedAt)}` : ''}
+                  </div>
+                ) : null}
               </div>
 
               <div className="toolbar-actions">
@@ -701,6 +763,7 @@ export default function HomePage() {
           </section>
 
           {error ? <div className="error-box">{error}</div> : null}
+          {selected?.syncError ? <div className="error-box">{selected.syncError}</div> : null}
 
           {!selected ? (
             <section className="card empty-state large">
