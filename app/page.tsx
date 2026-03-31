@@ -59,6 +59,21 @@ function emptyComparison(): SavedComparison {
   }
 }
 
+function normalizeMlaInput(value: string) {
+  const digits = String(value || '')
+    .toUpperCase()
+    .replace(/^MLA/i, '')
+    .replace(/\D/g, '')
+  return digits ? `MLA${digits}` : ''
+}
+
+function mlaDigits(value: string) {
+  return String(value || '')
+    .toUpperCase()
+    .replace(/^MLA/i, '')
+    .replace(/\D/g, '')
+}
+
 function hydrateManual(value?: Partial<ManualOverride> | null): ManualOverride {
   return {
     title: value?.title || '',
@@ -469,7 +484,7 @@ export default function HomePage() {
         }))
         .filter((item) => item.url)
 
-      if (!selected.myUrl.trim()) throw new Error('Pegá la URL de tu publicación.')
+      if (!selected.myUrl.trim()) throw new Error('Ingresá el MLA de tu publicación.')
       if (!competitors.length) throw new Error('Agregá al menos un competidor con URL.')
 
       const res = await fetch('/api/compare', {
@@ -806,12 +821,22 @@ export default function HomePage() {
                       </div>
 
                       <div>
-                        <label className="label">URL de mi publicación</label>
-                        <input
-                          className="input"
-                          value={selected.myUrl}
-                          onChange={(e) => updateSelected((current) => ({ ...current, myUrl: e.target.value }))}
-                        />
+                        <label className="label">MLA de mi publicación</label>
+                        <div className="mla-input-wrap">
+                          <span className="mla-prefix">MLA</span>
+                          <input
+                            className="input mla-input"
+                            inputMode="numeric"
+                            placeholder="901965859"
+                            value={mlaDigits(selected.myUrl)}
+                            onChange={(e) =>
+                              updateSelected((current) => ({
+                                ...current,
+                                myUrl: normalizeMlaInput(e.target.value),
+                              }))
+                            }
+                          />
+                        </div>
                       </div>
                     </div>
 
