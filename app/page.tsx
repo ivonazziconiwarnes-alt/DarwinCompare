@@ -815,72 +815,6 @@ export default function HomePage() {
                       </div>
                     </div>
 
-                    <div className="panel-block">
-                      <div className="panel-header">
-                        <div>
-                          <div className="eyebrow">Respaldo manual</div>
-                          <h3>Mi publicación</h3>
-                        </div>
-                      </div>
-
-                      <div className="form-grid">
-                        <div>
-                          <label className="label">Título manual</label>
-                          <input
-                            className="input"
-                            value={selected.myManual.title}
-                            onChange={(e) =>
-                              updateSelected((current) => ({
-                                ...current,
-                                myManual: { ...hydrateManual(current.myManual), title: e.target.value },
-                              }))
-                            }
-                          />
-                        </div>
-
-                        <div>
-                          <label className="label">Precio manual</label>
-                          <input
-                            className="input"
-                            value={selected.myManual.price}
-                            onChange={(e) =>
-                              updateSelected((current) => ({
-                                ...current,
-                                myManual: { ...hydrateManual(current.myManual), price: e.target.value },
-                              }))
-                            }
-                          />
-                        </div>
-
-                        <div>
-                          <label className="label">MLA manual</label>
-                          <input
-                            className="input"
-                            value={selected.myManual.itemId}
-                            onChange={(e) =>
-                              updateSelected((current) => ({
-                                ...current,
-                                myManual: { ...hydrateManual(current.myManual), itemId: e.target.value },
-                              }))
-                            }
-                          />
-                        </div>
-
-                        <div>
-                          <label className="label">URL imagen manual</label>
-                          <input
-                            className="input"
-                            value={selected.myManual.imageUrl}
-                            onChange={(e) =>
-                              updateSelected((current) => ({
-                                ...current,
-                                myManual: { ...hydrateManual(current.myManual), imageUrl: e.target.value },
-                              }))
-                            }
-                          />
-                        </div>
-                      </div>
-                    </div>
 
                     {dirty ? <div className="status-chip">Tenés cambios sin guardar</div> : null}
 
@@ -928,52 +862,6 @@ export default function HomePage() {
                               </div>
                             </div>
 
-                            <div className="panel-block" style={{ marginTop: 14 }}>
-                              <div className="panel-header">
-                                <div>
-                                  <div className="eyebrow">Respaldo manual</div>
-                                  <h3 style={{ marginTop: 4 }}>Datos opcionales</h3>
-                                </div>
-                              </div>
-
-                              <div className="form-grid">
-                                <div>
-                                  <label className="label">Título manual</label>
-                                  <input
-                                    className="input"
-                                    value={competitor.manualOverride.title}
-                                    onChange={(e) => updateCompetitorManual(competitor.id, 'title', e.target.value)}
-                                  />
-                                </div>
-
-                                <div>
-                                  <label className="label">Precio manual</label>
-                                  <input
-                                    className="input"
-                                    value={competitor.manualOverride.price}
-                                    onChange={(e) => updateCompetitorManual(competitor.id, 'price', e.target.value)}
-                                  />
-                                </div>
-
-                                <div>
-                                  <label className="label">MLA manual</label>
-                                  <input
-                                    className="input"
-                                    value={competitor.manualOverride.itemId}
-                                    onChange={(e) => updateCompetitorManual(competitor.id, 'itemId', e.target.value)}
-                                  />
-                                </div>
-
-                                <div>
-                                  <label className="label">URL imagen manual</label>
-                                  <input
-                                    className="input"
-                                    value={competitor.manualOverride.imageUrl}
-                                    onChange={(e) => updateCompetitorManual(competitor.id, 'imageUrl', e.target.value)}
-                                  />
-                                </div>
-                              </div>
-                            </div>
                           </div>
                         ))}
                       </div>
