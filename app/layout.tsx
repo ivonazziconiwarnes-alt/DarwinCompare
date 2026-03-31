@@ -2,7 +2,7 @@ import './globals.css'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
-  title: 'Comparador ML Pro',
+  title: 'Comparador ML',
   description: 'Comparador web de publicaciones de Mercado Libre',
 }
 
