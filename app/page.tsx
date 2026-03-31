@@ -553,7 +553,7 @@ export default function HomePage() {
             <Loader2 size={16} className="spin" />
             Verificando acceso
           </div>
-          <h1>Comparador ML Pro</h1>
+          <h1>Comparador ML</h1>
           <p className="auth-copy">Estamos revisando tu sesión para entrar al panel.</p>
         </section>
       </main>
@@ -568,7 +568,7 @@ export default function HomePage() {
             <LockKeyhole size={16} />
             Acceso privado
           </div>
-          <h1>Comparador ML Pro</h1>
+          <h1>Comparador ML</h1>
           <p className="auth-copy">
             Ingresá con tu usuario y contraseña para ver, editar y guardar comparaciones.
           </p>
@@ -620,7 +620,7 @@ export default function HomePage() {
                 <FolderKanban size={16} />
                 Comparaciones
               </div>
-              <h1>Comparador ML Pro</h1>
+              <h1>Comparador ML</h1>
             </div>
 
             <button className="button primary" onClick={createComparison}>
@@ -694,10 +694,15 @@ export default function HomePage() {
                 </div>
 
                 {selected ? (
-                  <div className={`sync-badge ${syncClass(selected.syncStatus)}`} style={{ marginTop: 8 }}>
-                    {syncLabel(selected.syncStatus)}
-                    {selected.lastSyncedAt ? ` · ${prettyDate(selected.lastSyncedAt)}` : ''}
-                  </div>
+                  <>
+                    <div className={`sync-badge ${syncClass(selected.syncStatus)}`} style={{ marginTop: 8 }}>
+                      {syncLabel(selected.syncStatus)}
+                      {selected.lastSyncedAt ? ` · ${prettyDate(selected.lastSyncedAt)}` : ''}
+                    </div>
+                    <div className="toolbar-note">
+                      Los cambios guardados acá se reflejan en escritorio al usar <strong>Importar web</strong>.
+                    </div>
+                  </>
                 ) : null}
               </div>
 
@@ -709,19 +714,6 @@ export default function HomePage() {
                       {showEditor ? 'Cerrar editor' : 'Editar'}
                     </button>
 
-                    <button className="button subtle" onClick={handleCompare} disabled={loadingCompare}>
-                      {loadingCompare ? (
-                        <>
-                          <Loader2 size={16} className="spin" />
-                          Comparando...
-                        </>
-                      ) : (
-                        <>
-                          <RefreshCw size={16} />
-                          Comparar
-                        </>
-                      )}
-                    </button>
 
                     <button className="button ghost" onClick={() => saveComparison()} disabled={!dirty || saving}>
                       {saving ? (
@@ -1045,7 +1037,7 @@ export default function HomePage() {
                         </thead>
                         <tbody>
                           {rows.map((row, index) => (
-                            <tr key={`${row.role}-${row.itemId || index}`}>
+                            <tr key={`${row.role}-${row.itemId || index}`} className={row.role === 'mine' ? 'row-mine' : undefined}>
                               <td>
                                 {row.imageUrl ? (
                                   <button
@@ -1062,7 +1054,7 @@ export default function HomePage() {
                               </td>
 
                               <td>
-                                <span className="pill">{row.role === 'mine' ? 'Mío' : 'Comp'}</span>
+                                <span className={`pill ${row.role === 'mine' ? 'pill-mine' : 'pill-comp'}`}>{row.role === 'mine' ? 'Mío' : 'Comp'}</span>
                               </td>
 
                               <td>{row.name}</td>
