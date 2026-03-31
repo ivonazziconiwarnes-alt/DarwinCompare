@@ -975,11 +975,77 @@ export default function HomePage() {
                         </tbody>
                       </table>
                     </div>
+
+                    <div className="results-mobile-list">
+                      {rows.map((row, index) => (
+                        <article key={`mobile-${row.role}-${row.itemId || index}`} className={`mobile-result-card ${row.role === 'mine' ? 'is-mine' : ''}`}>
+                          <div className="mobile-result-top">
+                            <div className="mobile-result-media">
+                              {row.imageUrl ? (
+                                <button
+                                  className="thumb-button"
+                                  onClick={() => setPreviewImage({ src: row.imageUrl!, title: row.title || row.name })}
+                                >
+                                  <img className="thumb" src={row.imageUrl} alt={row.title || row.name} />
+                                </button>
+                              ) : (
+                                <div className="thumb placeholder">
+                                  <ImageIcon size={18} />
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="mobile-result-main">
+                              <div className="mobile-result-head">
+                                <span className={`pill ${row.role === 'mine' ? 'pill-mine' : 'pill-comp'}`}>{row.role === 'mine' ? 'Mío' : 'Comp'}</span>
+                                <span className="mobile-result-source">{row.source.toUpperCase()}</span>
+                              </div>
+
+                              <div className="mobile-result-name">{row.name}</div>
+                              <div className="mobile-result-title">{row.title || '—'}</div>
+                            </div>
+                          </div>
+
+                          <div className="mobile-metrics">
+                            <div className="mobile-metric">
+                              <span className="mobile-metric-label">Precio</span>
+                              <strong>{money(row.price, row.currency)}</strong>
+                            </div>
+
+                            <div className={`mobile-metric ${typeof row.diff === 'number' ? (row.diff > 0 ? 'good-text' : row.diff < 0 ? 'bad-text' : '') : ''}`}>
+                              <span className="mobile-metric-label">Dif.</span>
+                              <strong>{typeof row.diff === 'number' ? money(row.diff, row.currency) : '—'}</strong>
+                            </div>
+
+                            <div className={`mobile-metric ${typeof row.pct === 'number' ? (row.pct > 0 ? 'good-text' : row.pct < 0 ? 'bad-text' : '') : ''}`}>
+                              <span className="mobile-metric-label">%</span>
+                              <strong>{typeof row.pct === 'number' ? percent(row.pct) : '—'}</strong>
+                            </div>
+                          </div>
+
+                          <div className="mobile-meta-grid">
+                            <div>
+                              <span className="mobile-metric-label">MLA</span>
+                              <div className="mobile-meta-value">{row.itemId || '—'}</div>
+                            </div>
+                            <div>
+                              <span className="mobile-metric-label">Estado</span>
+                              <div className="mobile-meta-value">{row.error || (row.title || row.price !== null ? 'OK' : 'Sin datos')}</div>
+                            </div>
+                          </div>
+
+                          <a className="mobile-open-link" href={row.url} target="_blank" rel="noreferrer">
+                            Abrir publicación
+                            <ExternalLink size={14} />
+                          </a>
+                        </article>
+                      ))}
+                    </div>
                   </>
                 ) : (
                   <div className="empty-state large">
                     <RefreshCw size={20} />
-                    Cargá URLs y tocá <strong>Comparar</strong> para ver resultados.
+                    Guardá los cambios acá y actualizá desde escritorio para ver los resultados sincronizados.
                   </div>
                 )}
               </section>
