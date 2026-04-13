@@ -11,6 +11,7 @@ type ListingData = {
 }
 
 const ITEM_ID_RE = /(MLA\d+)/i
+const BROWSERLESS_TIMEOUT_MS = 12000
 
 function extractItemId(value: string | null | undefined) {
   if (!value) return null
@@ -132,9 +133,9 @@ async function maybeOpenFirstSearchResult(page: any) {
 
   await page.goto(href, {
     waitUntil: 'domcontentloaded',
-    timeout: 45000,
+    timeout: BROWSERLESS_TIMEOUT_MS,
   })
-  await page.waitForTimeout(2000)
+  await page.waitForTimeout(1000)
 }
 
 async function extractPageData(page: any, sourceUrl: string) {
@@ -269,9 +270,9 @@ export async function scrapeListingWithBrowserless(sourceUrl: string, itemId: st
       try {
         await page.goto(url, {
           waitUntil: 'domcontentloaded',
-          timeout: 45000,
+          timeout: BROWSERLESS_TIMEOUT_MS,
         })
-        await page.waitForTimeout(2500)
+        await page.waitForTimeout(1200)
         await maybeOpenFirstSearchResult(page)
 
         const extracted = await extractPageData(page, url)

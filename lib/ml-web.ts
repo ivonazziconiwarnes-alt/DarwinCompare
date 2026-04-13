@@ -4,6 +4,7 @@ import type { CompareResponse, CompareRow, ManualOverride, SavedComparison } fro
 
 const API_BASE = 'https://api.mercadolibre.com'
 const ITEM_ID_RE = /(M[A-Z]{2,3}\d+)/gi
+const REQUEST_TIMEOUT_MS = 12000
 
 const BROWSER_HEADERS = {
   'User-Agent':
@@ -205,6 +206,7 @@ async function apiFetch(path: string, init?: RequestInit) {
   return fetch(`${API_BASE}${path}`, {
     ...init,
     cache: 'no-store',
+    signal: init?.signal || AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     headers: {
       Accept: 'application/json',
       'User-Agent': 'ComparadorML/Web',
@@ -312,6 +314,7 @@ async function scrapeListing(url: string): Promise<{ data: ListingData | null; e
       cache: 'no-store',
       headers: BROWSER_HEADERS,
       redirect: 'follow',
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     })
 
     if (!response.ok) return { data: null, error: `WEB ${response.status}` }
@@ -547,18 +550,18 @@ export async function runWebComparison(comparison: SavedComparison): Promise<Run
     ),
   )
 
-  for (const [index, competitor] of competitors.entries()) {
-    const label = competitor.name?.trim() || `Competidor ${index + 1}`
-    const rawSourceUrl = competitor.url?.trim() || ''
-    const previousUrl = previousCompetitorRows[index]?.url || ''
-    const sourceUrl = isHttpUrl(rawSourceUrl) ? rawSourceUrl : previousUrl || rawSourceUrl
-    const manualOverride = competitor.manualOverride
-    const competitorItemId =
-      extractItemId(rawSourceUrl) || extractItemId(previousUrl) || extractItemId(manualOverride?.itemId)
-    const resolved = await resolveListing(competitorItemId, sourceUrl)
+  const competitorRows = await Promise.all(
+    competitors.map(async (competitor, index) => {
+      const label = competitor.name?.trim() || `Competidor ${index + 1}`
+      const rawSourceUrl = competitor.url?.trim() || ''
+      const previousUrl = previousCompetitorRows[index]?.url || ''
+      const sourceUrl = isHttpUrl(rawSourceUrl) ? rawSourceUrl : previousUrl || rawSourceUrl
+      const manualOverride = competitor.manualOverride
+      const competitorItemId =
+        extractItemId(rawSourceUrl) || extractItemId(previousUrl) || extractItemId(manualOverride?.itemId)
+      const resolved = await resolveListing(competitorItemId, sourceUrl)
 
-    rows.push(
-      applyManualOverride(
+      return applyManualOverride(
         buildRow({
           role: 'competitor',
           name: label,
@@ -568,9 +571,11 @@ export async function runWebComparison(comparison: SavedComparison): Promise<Run
           error: resolved.error,
         }),
         manualOverride,
-      ),
-    )
-  }
+      )
+    }),
+  )
+
+  rows.push(...competitorRows)
 
   const minePrice = rows.find((row) => row.role === 'mine')?.price ?? null
   rows.forEach((row) => {
