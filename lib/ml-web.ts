@@ -507,6 +507,14 @@ function buildRow(args: {
 }
 
 async function resolveListing(itemId: string | null, sourceUrl: string) {
+  return resolveListingWithOptions(itemId, sourceUrl, { allowBrowserless: true })
+}
+
+async function resolveListingWithOptions(
+  itemId: string | null,
+  sourceUrl: string,
+  options?: { allowBrowserless?: boolean },
+) {
   const candidates = new Set<string>()
   if (itemId) candidates.add(itemId.toUpperCase())
   extractItemCandidates(sourceUrl).forEach((candidate) => candidates.add(candidate.toUpperCase()))
@@ -529,14 +537,34 @@ async function resolveListing(itemId: string | null, sourceUrl: string) {
     if (apiResult.error) debug.push(apiResult.error)
   }
 
-  const browserless = await scrapeListingWithBrowserless(sourceUrl, itemId)
-  if (browserless.data) return browserless
-  if (browserless.error) debug.push(browserless.error)
+  if (options?.allowBrowserless !== false) {
+    const browserless = await scrapeListingWithBrowserless(sourceUrl, itemId)
+    if (browserless.data) return browserless
+    if (browserless.error) debug.push(browserless.error)
+  }
 
   return {
     data: null,
     error: debug.join(' | ') || 'Sin datos',
   }
+}
+
+function buildCachedRowFallback(current: CompareRow, previous: CompareRow | undefined) {
+  if (!previous || previous.price === null || !previous.title) return current
+  if (current.price !== null && current.title) return current
+
+  return {
+    ...current,
+    url: current.url || previous.url,
+    itemId: current.itemId || previous.itemId,
+    title: current.title || previous.title,
+    price: current.price ?? previous.price,
+    currency: current.currency || previous.currency,
+    imageUrl: current.imageUrl || previous.imageUrl,
+    source: previous.source,
+    sourceKind: 'CACHE',
+    error: undefined,
+  } satisfies CompareRow
 }
 
 export async function runWebComparison(comparison: SavedComparison): Promise<RunComparisonResult> {
@@ -546,6 +574,7 @@ export async function runWebComparison(comparison: SavedComparison): Promise<Run
   const myManual = comparison.myManual
   const competitors = comparison.competitors || []
   const previousRows = comparison.lastResult?.rows || []
+  const previousMineRow = previousRows.find((row) => row.role === 'mine')
   const previousMineUrl = previousRows.find((row) => row.role === 'mine')?.url || ''
   const previousCompetitorRows = previousRows.filter((row) => row.role === 'competitor')
 
@@ -557,18 +586,23 @@ export async function runWebComparison(comparison: SavedComparison): Promise<Run
   const rows: CompareRow[] = []
   const mySourceUrl = isHttpUrl(myUrl) ? myUrl : previousMineUrl || myUrl
 
-  const myResult = await resolveListing(myItemId, mySourceUrl)
+  const myResult = await resolveListingWithOptions(myItemId, mySourceUrl, {
+    allowBrowserless: !previousMineRow,
+  })
   rows.push(
-    applyManualOverride(
-      buildRow({
-        role: 'mine',
-        name: myName,
-        sourceUrl: mySourceUrl,
-        itemId: myItemId,
-        itemData: myResult.data,
-        error: myResult.error,
-      }),
-      myManual,
+    buildCachedRowFallback(
+      applyManualOverride(
+        buildRow({
+          role: 'mine',
+          name: myName,
+          sourceUrl: mySourceUrl,
+          itemId: myItemId,
+          itemData: myResult.data,
+          error: myResult.error,
+        }),
+        myManual,
+      ),
+      previousMineRow,
     ),
   )
 
@@ -581,18 +615,24 @@ export async function runWebComparison(comparison: SavedComparison): Promise<Run
       const manualOverride = competitor.manualOverride
       const competitorItemId =
         extractItemId(rawSourceUrl) || extractItemId(previousUrl) || extractItemId(manualOverride?.itemId)
-      const resolved = await resolveListing(competitorItemId, sourceUrl)
+      const previousRow = previousCompetitorRows[index]
+      const resolved = await resolveListingWithOptions(competitorItemId, sourceUrl, {
+        allowBrowserless: !previousRow,
+      })
 
-      return applyManualOverride(
-        buildRow({
-          role: 'competitor',
-          name: label,
-          sourceUrl,
-          itemId: competitorItemId,
-          itemData: resolved.data,
-          error: resolved.error,
-        }),
-        manualOverride,
+      return buildCachedRowFallback(
+        applyManualOverride(
+          buildRow({
+            role: 'competitor',
+            name: label,
+            sourceUrl,
+            itemId: competitorItemId,
+            itemData: resolved.data,
+            error: resolved.error,
+          }),
+          manualOverride,
+        ),
+        previousRow,
       )
     }),
   )
@@ -613,10 +653,13 @@ export async function runWebComparison(comparison: SavedComparison): Promise<Run
 
   const okCount = rows.filter((row) => !row.error).length
   const failedCount = rows.length - okCount
+  const cacheFallbackCount = rows.filter((row) => row.sourceKind === 'CACHE').length
   const status: 'ok' | 'error' = minePrice !== null ? 'ok' : 'error'
   const error =
     status === 'error'
       ? rows[0]?.error || 'No se pudieron obtener datos de la publicacion principal.'
+      : cacheFallbackCount > 0
+        ? `Se mostraron ${cacheFallbackCount} fila(s) con el ultimo resultado guardado porque Mercado Libre bloqueo la lectura en vivo.`
       : null
 
   return {
