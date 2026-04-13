@@ -1,65 +1,16 @@
 import { NextResponse } from 'next/server'
 import { isAuthenticatedRequest } from '@/lib/auth'
-import { ComparePayload, applyManualOverride, computeRows, scrapeListing } from '@/lib/ml'
-
-export const maxDuration = 60
-
-function delay(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
 
 export async function POST(request: Request) {
   if (!isAuthenticatedRequest(request)) {
     return NextResponse.json({ error: 'No autorizado. Iniciá sesión.' }, { status: 401 })
   }
 
-  try {
-    const body = (await request.json()) as ComparePayload
-
-    const competitors = (body.competitors || []).filter((item) => item.url?.trim())
-
-    if (!body.myUrl?.trim()) {
-      return NextResponse.json({ error: 'Falta la URL de tu publicación.' }, { status: 400 })
-    }
-
-    if (!competitors.length) {
-      return NextResponse.json({ error: 'Pegá al menos una URL de competidor.' }, { status: 400 })
-    }
-
-    const listings = []
-
-    const mineScraped = await scrapeListing(body.myUrl, 'mine', body.myName?.trim() || 'Mi publicación')
-    listings.push(applyManualOverride(mineScraped, body.myManual))
-
-    for (let i = 0; i < competitors.length; i++) {
-      const item = competitors[i]
-      await delay(250)
-      const scraped = await scrapeListing(
-        item.url,
-        'competitor',
-        item.name?.trim() || `Competidor ${i + 1}`,
-      )
-      listings.push(applyManualOverride(scraped, item.manualOverride))
-    }
-
-    const rows = computeRows(body, listings)
-    const okCount = rows.filter((row) => row.price !== null || (row.title && !row.error)).length
-    const failCount = rows.length - okCount
-
-    return NextResponse.json({
-      comparisonName: body.comparisonName || 'Comparación ML',
-      rows,
-      summary: {
-        total: rows.length,
-        ok: okCount,
-        failed: failCount,
-        minePrice: rows.find((row) => row.role === 'mine')?.price ?? null,
-      },
-    })
-  } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'No se pudo comparar.' },
-      { status: 500 },
-    )
-  }
+  return NextResponse.json(
+    {
+      error:
+        'La comparación directa quedó deshabilitada. Guardá la comparación y usá la cola de ejecución con worker.',
+    },
+    { status: 410 },
+  )
 }

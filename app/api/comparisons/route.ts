@@ -1,78 +1,8 @@
 import { NextResponse } from 'next/server'
 import { isAuthenticatedRequest } from '@/lib/auth'
+import { emptyManual, fetchComparisons, mapComparison } from '@/lib/comparison-store'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import type { ComparisonRecord, CompetitorRecord, SavedComparison } from '@/lib/types'
-
-function emptyManual() {
-  return {
-    title: '',
-    price: '',
-    itemId: '',
-    imageUrl: '',
-    currency: 'ARS',
-  }
-}
-
-function mapComparison(record: ComparisonRecord, competitors: CompetitorRecord[]): SavedComparison {
-  return {
-    id: record.id,
-    name: record.name,
-    category: record.category,
-    myName: record.my_name,
-    myUrl: record.my_url,
-    myManual: record.my_manual || emptyManual(),
-    createdAt: record.created_at,
-    updatedAt: record.updated_at,
-    lastResult: record.last_result,
-    syncStatus: record.sync_status || 'pending',
-    lastSyncedAt: record.last_synced_at || null,
-    syncError: record.sync_error || null,
-    competitors: competitors
-      .sort((a, b) => a.position - b.position)
-      .map((competitor) => ({
-        id: competitor.id,
-        name: competitor.name,
-        url: competitor.url,
-        position: competitor.position,
-        manualOverride: competitor.manual_override || emptyManual(),
-      })),
-  }
-}
-
-async function fetchComparisons() {
-  const supabase = getSupabaseAdmin()
-
-  const { data: comparisonRows, error: comparisonError } = await supabase
-    .from('comparisons')
-    .select('*')
-    .order('updated_at', { ascending: false })
-
-  if (comparisonError) throw comparisonError
-
-  const comparisonIds = (comparisonRows || []).map((row) => row.id)
-
-  let competitorsByComparison = new Map<string, CompetitorRecord[]>()
-  if (comparisonIds.length) {
-    const { data: competitorRows, error: competitorError } = await supabase
-      .from('comparison_competitors')
-      .select('*')
-      .in('comparison_id', comparisonIds)
-      .order('position', { ascending: true })
-
-    if (competitorError) throw competitorError
-
-    competitorsByComparison = new Map<string, CompetitorRecord[]>()
-    ;(competitorRows || []).forEach((row) => {
-      const list = competitorsByComparison.get(row.comparison_id) || []
-      list.push(row)
-      competitorsByComparison.set(row.comparison_id, list)
-    })
-  }
-
-  return (comparisonRows || []).map((row) =>
-    mapComparison(row as ComparisonRecord, competitorsByComparison.get(row.id) || []),
-  )
-}
 
 export async function GET(request: Request) {
   if (!isAuthenticatedRequest(request)) {
@@ -80,7 +10,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    const items = await fetchComparisons()
+    const items = await fetchComparisons(getSupabaseAdmin())
     return NextResponse.json({ items })
   } catch (error) {
     return NextResponse.json(

@@ -1,73 +1,122 @@
-# Comparador ML Web Pro + Supabase + Login
+# Comparador ML Web + Worker
 
-Esta versión guarda comparaciones en **Supabase** y protege el acceso con usuario y contraseña.
+Esta version deja la arquitectura en modo `web-first`.
 
-## Login por defecto
+## Como queda armado
 
-- Usuario: `Darwin`
-- Contraseña: `Warnes1102`
+### Web
 
-Podés cambiarlo con variables de entorno.
+La app web queda como panel central para:
 
-## Qué trae
+- login
+- alta y edicion de comparaciones
+- cola de ejecucion
+- ultimo resultado
+- historial de corridas
+- exportacion a Excel
 
-- Guardado real online
-- Categorías
-- Nombre de comparación
-- Nombre y URL por competidor
-- Comparación 100% por URL
-- Foto ampliable
-- Exportación a Excel
-- Interfaz minimalista
-- Editor que se abre con botón
-- Login simple por cookie firmado
+### Worker Python
+
+El motor real de actualizacion vive en `C:\FINAL\Comparacion MELI\web_compare_worker.py`.
+
+Ese worker:
+
+- toma jobs desde la web
+- usa la logica de Mercado Libre
+- intenta API publica
+- intenta API autenticada si hace falta
+- usa Playwright al final como fallback
+- devuelve el resultado a la web
+
+### Supabase
+
+Supabase queda como fuente central para:
+
+- comparaciones
+- competidores
+- ultimo resultado
+- historial de corridas
+- filas de cada corrida
+
+## Flujo final
+
+1. El usuario crea o edita una comparacion desde la web.
+2. La web guarda todo en Supabase.
+3. El usuario toca `Actualizar ahora`.
+4. Se crea una corrida en cola.
+5. El worker reclama la corrida.
+6. El worker ejecuta la comparacion real.
+7. El worker guarda resumen y filas.
+8. La web muestra estado, historial y ultimo resultado.
 
 ## Variables de entorno
 
-Creá `.env.local` con:
+Usar `.env.local` con estas variables:
 
 ```env
 SUPABASE_URL=https://TU-PROYECTO.supabase.co
 SUPABASE_SECRET_KEY=TU_SECRET_KEY
-APP_USERNAME=Darwin
-APP_PASSWORD=Warnes1102
-APP_SESSION_SECRET=darwin-warnes-1102-session-secret
+
+APP_USERNAME=TU_USUARIO
+APP_PASSWORD=TU_PASSWORD
+APP_SESSION_SECRET=TU_SECRETO_DE_SESSION
+
+DESKTOP_SYNC_TOKEN=TOKEN_PARA_SYNC_DESKTOP
+WORKER_SYNC_TOKEN=TOKEN_PARA_WORKER
 ```
 
-## SQL para Supabase
+Nota:
 
-```sql
-create extension if not exists pgcrypto;
+- `WORKER_SYNC_TOKEN` puede ser el mismo valor que `DESKTOP_SYNC_TOKEN` si queres simplificar.
+- la UI ya no viene precompletada con credenciales hardcodeadas.
 
-create table if not exists public.comparisons (
-  id uuid primary key default gen_random_uuid(),
-  name text not null default 'Nueva comparación',
-  category text not null default 'General',
-  my_name text not null default 'Mi publicación',
-  my_url text not null default '',
-  last_result jsonb null,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
+## SQL
 
-create table if not exists public.comparison_competitors (
-  id uuid primary key default gen_random_uuid(),
-  comparison_id uuid not null references public.comparisons(id) on delete cascade,
-  name text not null,
-  url text not null,
-  position integer not null default 0,
-  created_at timestamptz not null default now()
-);
+Aplicar el script:
 
-create index if not exists comparison_competitors_comparison_id_idx
-  on public.comparison_competitors (comparison_id, position);
-```
+- `supabase/worker_schema.sql`
 
-## Probar localmente
+Ese script crea o completa:
+
+- `comparisons`
+- `comparison_competitors`
+- `comparison_runs`
+- `comparison_run_rows`
+
+## Worker
+
+### Ejecutar una sola vez
 
 ```bash
-npm install
-npm run dev
+python C:\FINAL\Comparacion MELI\web_compare_worker.py --once
 ```
 
-Abrí `http://localhost:3000`.
+### Ejecutar en loop
+
+```bash
+python C:\FINAL\Comparacion MELI\web_compare_worker.py
+```
+
+### Abrir login manual de ML
+
+```bash
+python C:\FINAL\Comparacion MELI\web_compare_worker.py --open-login
+```
+
+## Estado del compare legacy
+
+La ruta `/api/compare` queda deshabilitada a proposito.
+
+La arquitectura nueva ya no usa comparacion directa desde Next.js.
+Ahora el camino correcto es:
+
+- guardar
+- encolar corrida
+- procesar con worker
+
+## Build validado
+
+Se valido:
+
+- `npm.cmd run build`
+- `python -m py_compile C:\FINAL\Comparacion MELI\web_compare_worker.py`

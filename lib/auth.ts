@@ -1,6 +1,8 @@
 import { createHmac, timingSafeEqual } from 'crypto'
 
 const COOKIE_NAME = 'comparador_ml_auth'
+const WORKER_HEADER = 'x-worker-token'
+const WORKER_ID_HEADER = 'x-worker-id'
 
 const DEFAULT_USERNAME = 'Darwin'
 const DEFAULT_PASSWORD = 'Warnes1102'
@@ -54,6 +56,11 @@ export function verifySessionToken(token?: string | null) {
   return safeEqual(signature, expected)
 }
 
+export function sessionUsernameFromToken(token?: string | null) {
+  if (!verifySessionToken(token)) return null
+  return token?.split('.')?.[0] || null
+}
+
 function parseCookieHeader(cookieHeader: string | null) {
   const out: Record<string, string> = {}
   if (!cookieHeader) return out
@@ -72,6 +79,26 @@ export function isAuthenticatedRequest(request: Request) {
   const cookies = parseCookieHeader(cookieHeader)
   const token = cookies[COOKIE_NAME]
   return verifySessionToken(token)
+}
+
+export function authenticatedUsername(request: Request) {
+  const cookieHeader = request.headers.get('cookie')
+  const cookies = parseCookieHeader(cookieHeader)
+  return sessionUsernameFromToken(cookies[COOKIE_NAME])
+}
+
+function getWorkerToken() {
+  return process.env.WORKER_SYNC_TOKEN || process.env.DESKTOP_SYNC_TOKEN || ''
+}
+
+export function isWorkerRequest(request: Request) {
+  const token = request.headers.get(WORKER_HEADER) || ''
+  const expected = getWorkerToken()
+  return !!expected && safeEqual(token, expected)
+}
+
+export function workerRequestId(request: Request) {
+  return request.headers.get(WORKER_ID_HEADER) || null
 }
 
 export function authCookieName() {

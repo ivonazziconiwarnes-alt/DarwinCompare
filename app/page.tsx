@@ -19,7 +19,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react'
-import type { CompareResponse, CompetitorInput, ManualOverride, SavedComparison } from '@/lib/types'
+import type { ComparisonRun, CompetitorInput, ManualOverride, SavedComparison } from '@/lib/types'
 
 function uid() {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID()
@@ -121,25 +121,36 @@ function prettyDate(value: string) {
   }
 }
 
-function syncLabel(status: 'pending' | 'ok' | 'error') {
+function syncLabel(status: 'pending' | 'running' | 'ok' | 'error') {
   if (status === 'ok') return 'Actualizada'
+  if (status === 'running') return 'Ejecutando'
   if (status === 'error') return 'Error'
-  return 'Pendiente'
+  return 'En cola'
 }
 
-function syncClass(status: 'pending' | 'ok' | 'error') {
+function syncClass(status: 'pending' | 'running' | 'ok' | 'error') {
   if (status === 'ok') return 'sync-ok'
+  if (status === 'running') return 'sync-running'
   if (status === 'error') return 'sync-error'
   return 'sync-pending'
 }
 
+function runStatusCopy(run: ComparisonRun) {
+  if (run.status === 'ok') return 'Completada'
+  if (run.status === 'running') return 'En ejecucion'
+  if (run.status === 'error') return 'Fallida'
+  return 'En cola'
+}
+
 export default function HomePage() {
   const [items, setItems] = useState<SavedComparison[]>([])
+  const [runs, setRuns] = useState<ComparisonRun[]>([])
   const [selectedId, setSelectedId] = useState<string>('')
   const [categoryFilter, setCategoryFilter] = useState<string>('Todas')
   const [loadingInitial, setLoadingInitial] = useState(true)
   const [saving, setSaving] = useState(false)
   const [loadingCompare, setLoadingCompare] = useState(false)
+  const [loadingRuns, setLoadingRuns] = useState(false)
   const [checkingSession, setCheckingSession] = useState(true)
   const [loggedIn, setLoggedIn] = useState(false)
   const [loginLoading, setLoginLoading] = useState(false)
@@ -147,8 +158,8 @@ export default function HomePage() {
   const [error, setError] = useState<string | null>(null)
   const [previewImage, setPreviewImage] = useState<{ src: string; title: string } | null>(null)
   const [dirtyIds, setDirtyIds] = useState<string[]>([])
-  const [loginUser, setLoginUser] = useState('Darwin')
-  const [loginPassword, setLoginPassword] = useState('Warnes1102')
+  const [loginUser, setLoginUser] = useState('')
+  const [loginPassword, setLoginPassword] = useState('')
 
   const selected = useMemo(() => items.find((item) => item.id === selectedId) || null, [items, selectedId])
 
@@ -210,9 +221,55 @@ export default function HomePage() {
     }
   }
 
+  async function loadRuns(comparisonId: string, { silent = false }: { silent?: boolean } = {}) {
+    if (!comparisonId) {
+      setRuns([])
+      return
+    }
+
+    if (!silent) setLoadingRuns(true)
+
+    try {
+      const res = await fetch(`/api/comparisons/${comparisonId}/runs?limit=8`, { cache: 'no-store' })
+
+      if (res.status === 401) {
+        setLoggedIn(false)
+        setRuns([])
+        return
+      }
+
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error || 'No se pudieron leer las ejecuciones.')
+      setRuns((json.items as ComparisonRun[]) || [])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudieron leer las ejecuciones.')
+    } finally {
+      if (!silent) setLoadingRuns(false)
+    }
+  }
+
   useEffect(() => {
     checkSession()
   }, [])
+
+  useEffect(() => {
+    if (!loggedIn || !selectedId) {
+      setRuns([])
+      return
+    }
+    loadRuns(selectedId)
+  }, [loggedIn, selectedId])
+
+  useEffect(() => {
+    if (!loggedIn || !selectedId || !selected || !['pending', 'running'].includes(selected.syncStatus)) return
+
+    const timer = window.setInterval(() => {
+      void loadComparisons(selectedId)
+      void loadRuns(selectedId, { silent: true })
+    }, 5000)
+
+    return () => window.clearInterval(timer)
+  }, [loggedIn, selectedId, selected?.syncStatus])
 
   const categories = useMemo(() => {
     const set = new Set(['Todas'])
@@ -469,13 +526,17 @@ export default function HomePage() {
     })
   }
 
-  async function handleCompare() {
+  async function enqueueRun() {
     if (!selected) return
 
     setLoadingCompare(true)
     setError(null)
 
     try {
+      if (dirty) {
+        await saveComparison()
+      }
+
       const competitors = selected.competitors
         .map((item) => ({
           name: item.name.trim() || 'Competidor',
@@ -487,39 +548,24 @@ export default function HomePage() {
       if (!selected.myUrl.trim()) throw new Error('Ingresá el MLA de tu publicación.')
       if (!competitors.length) throw new Error('Agregá al menos un competidor con URL.')
 
-      const res = await fetch('/api/compare', {
+      const queueRes = await fetch(`/api/comparisons/${selected.id}/enqueue`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          comparisonName: selected.name,
-          myName: selected.myName,
-          myUrl: selected.myUrl,
-          myManual: selected.myManual,
-          competitors,
-        }),
       })
 
-      if (res.status === 401) {
+      if (queueRes.status === 401) {
         setLoggedIn(false)
         return
       }
 
-      const json = (await res.json()) as CompareResponse
-      if (!res.ok) throw new Error(json.error || 'No se pudo comparar.')
+      const queueJson = await queueRes.json()
+      if (!queueRes.ok) throw new Error(queueJson.error || 'No se pudo encolar la actualización.')
 
-      const nextSelected = hydrateComparison({
-        ...selected,
-        lastResult: json,
-        updatedAt: new Date().toISOString(),
-        syncStatus: 'ok',
-        lastSyncedAt: new Date().toISOString(),
-        syncError: null,
-      })
+      await loadComparisons(selected.id)
+      await loadRuns(selected.id)
+      return
 
-      setItems((prev) => prev.map((item) => (item.id === selected.id ? nextSelected : item)))
-      await saveComparison(nextSelected)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo comparar.')
+      setError(err instanceof Error ? err.message : 'No se pudo encolar la actualización.')
     } finally {
       setLoadingCompare(false)
     }
@@ -715,7 +761,7 @@ export default function HomePage() {
                       {selected.lastSyncedAt ? ` · ${prettyDate(selected.lastSyncedAt)}` : ''}
                     </div>
                     <div className="toolbar-note">
-                      Los cambios guardados acá se reflejan en escritorio al usar <strong>Importar web</strong>.
+                      La web queda como panel central: guardás acá, encolás una corrida y el worker publica el resultado.
                     </div>
                   </>
                 ) : null}
@@ -727,6 +773,24 @@ export default function HomePage() {
                     <button className={`button ghost ${showEditor ? 'is-active' : ''}`} onClick={() => setShowEditor((v) => !v)}>
                       <PencilLine size={16} />
                       {showEditor ? 'Cerrar editor' : 'Editar'}
+                    </button>
+
+                    <button
+                      className="button primary"
+                      onClick={enqueueRun}
+                      disabled={loadingCompare || selected.syncStatus === 'running'}
+                    >
+                      {loadingCompare ? (
+                        <>
+                          <Loader2 size={16} className="spin" />
+                          Encolando...
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw size={16} />
+                          Actualizar ahora
+                        </>
+                      )}
                     </button>
 
 
@@ -906,6 +970,45 @@ export default function HomePage() {
                   </div>
                 </div>
 
+                <div className="runs-panel">
+                  <div className="runs-panel-head">
+                    <div>
+                      <div className="eyebrow">Corridas</div>
+                      <h3>Ultimas ejecuciones</h3>
+                    </div>
+                    {loadingRuns ? (
+                      <div className="runs-loading">
+                        <Loader2 size={14} className="spin" />
+                        Cargando
+                      </div>
+                    ) : null}
+                  </div>
+
+                  {runs.length ? (
+                    <div className="runs-list">
+                      {runs.map((run) => (
+                        <article key={run.id} className="run-card">
+                          <div className="run-card-top">
+                            <div className={`sync-badge ${syncClass(run.status)}`}>{runStatusCopy(run)}</div>
+                            <div className="run-card-time">{prettyDate(run.requestedAt)}</div>
+                          </div>
+                          <div className="run-card-meta">
+                            {run.resultSummary
+                              ? `${run.resultSummary.ok}/${run.resultSummary.total} con datos`
+                              : 'Esperando resultado'}
+                            {run.workerId ? ` · ${run.workerId}` : ''}
+                          </div>
+                          {run.error ? <div className="run-card-error">{run.error}</div> : null}
+                        </article>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="empty-state runs-empty">
+                      Todavía no hay ejecuciones registradas para esta comparación.
+                    </div>
+                  )}
+                </div>
+
                 {selected.lastResult ? (
                   <>
                     <div className="stats-grid">
@@ -982,7 +1085,7 @@ export default function HomePage() {
 
                               <td>{row.itemId || '—'}</td>
 
-                              <td>{row.source.toUpperCase()}</td>
+                              <td>{row.sourceKind || row.source.toUpperCase()}</td>
 
                               <td>{money(row.price, row.currency)}</td>
 
@@ -1023,7 +1126,7 @@ export default function HomePage() {
                             <div className="mobile-result-main">
                               <div className="mobile-result-head">
                                 <span className={`pill ${row.role === 'mine' ? 'pill-mine' : 'pill-comp'}`}>{row.role === 'mine' ? 'Mío' : 'Comp'}</span>
-                                <span className="mobile-result-source">{row.source.toUpperCase()}</span>
+                                <span className="mobile-result-source">{row.sourceKind || row.source.toUpperCase()}</span>
                               </div>
 
                               <div className="mobile-result-name">{row.name}</div>
@@ -1070,7 +1173,7 @@ export default function HomePage() {
                 ) : (
                   <div className="empty-state large">
                     <RefreshCw size={20} />
-                    Guardá los cambios acá y actualizá desde escritorio para ver los resultados sincronizados.
+                    Guardá los cambios, encolá una corrida y dejá que el worker publique el resultado.
                   </div>
                 )}
               </section>

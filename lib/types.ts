@@ -23,7 +23,8 @@ export type CompareRow = {
   price: number | null
   currency: string | null
   imageUrl: string | null
-  source: 'web' | 'manual'
+  source: 'api' | 'web' | 'manual' | 'playwright' | 'desktop' | 'worker'
+  sourceKind?: string | null
   error?: string
   diff?: number | null
   pct?: number | null
@@ -52,7 +53,7 @@ export type SavedComparison = {
   createdAt: string
   updatedAt: string
   lastResult: CompareResponse | null
-  syncStatus: 'pending' | 'ok' | 'error'
+  syncStatus: 'pending' | 'running' | 'ok' | 'error'
   lastSyncedAt: string | null
   syncError: string | null
 }
@@ -67,7 +68,7 @@ export type ComparisonRecord = {
   last_result: CompareResponse | null
   created_at: string
   updated_at: string
-  sync_status: 'pending' | 'ok' | 'error'
+  sync_status: 'pending' | 'running' | 'ok' | 'error'
   last_synced_at: string | null
   sync_error: string | null
 }
@@ -79,5 +80,58 @@ export type CompetitorRecord = {
   url: string
   position: number
   manual_override: ManualOverride | null
+  created_at: string
+}
+
+export type ComparisonRunStatus = 'pending' | 'running' | 'ok' | 'error'
+
+export type ComparisonRun = {
+  id: string
+  comparisonId: string
+  status: ComparisonRunStatus
+  triggerSource: string
+  requestedBy: string | null
+  requestedAt: string
+  startedAt: string | null
+  finishedAt: string | null
+  workerId: string | null
+  error: string | null
+  resultSummary: CompareResponse['summary'] | null
+  rows: CompareRow[]
+}
+
+export type ComparisonRunRecord = {
+  id: string
+  comparison_id: string
+  status: ComparisonRunStatus
+  trigger_source: string
+  requested_by: string | null
+  requested_at: string
+  started_at: string | null
+  finished_at: string | null
+  worker_id: string | null
+  error: string | null
+  result_summary: CompareResponse['summary'] | null
+  comparison_snapshot: SavedComparison | null
+  created_at: string
+}
+
+export type ComparisonRunRowRecord = {
+  id: string
+  run_id: string
+  position: number
+  role: 'mine' | 'competitor'
+  name: string
+  url: string
+  item_id: string | null
+  title: string | null
+  price: number | null
+  currency: string | null
+  image_url: string | null
+  source: CompareRow['source']
+  source_kind: string | null
+  error: string | null
+  diff: number | null
+  pct: number | null
   created_at: string
 }

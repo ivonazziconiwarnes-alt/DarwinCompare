@@ -14,7 +14,8 @@ type ExportRow = {
   price: number | null
   currency: string | null
   imageUrl: string | null
-  source: 'web' | 'manual'
+  source: 'api' | 'web' | 'manual' | 'playwright' | 'desktop' | 'worker'
+  sourceKind?: string | null
   error?: string
   diff?: number | null
   pct?: number | null
@@ -42,7 +43,7 @@ export async function POST(request: Request) {
       Moneda: row.currency || 'ARS',
       Diferencia: row.diff ?? '',
       'Porcentaje %': typeof row.pct === 'number' ? Number(row.pct.toFixed(2)) : '',
-      Fuente: row.source.toUpperCase(),
+      Fuente: row.sourceKind || row.source.toUpperCase(),
       URL: row.url,
       Error: row.error || '',
     }))
@@ -70,7 +71,7 @@ export async function POST(request: Request) {
       Precio: row.price ?? '',
       Diferencia: row.diff ?? '',
       Porcentaje: typeof row.pct === 'number' ? Number(row.pct.toFixed(2)) : '',
-      Fuente: row.source.toUpperCase(),
+      Fuente: row.sourceKind || row.source.toUpperCase(),
     }))
     const wsSummary = XLSX.utils.json_to_sheet(summary)
     wsSummary['!cols'] = [{ wch: 28 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }]

@@ -320,6 +320,82 @@ img {
   border-color: rgba(140, 110, 6, 0.16);
 }
 
+.sync-running {
+  background: rgba(47, 109, 246, 0.12);
+  color: var(--accent);
+  border-color: rgba(47, 109, 246, 0.18);
+}
+
+.runs-panel {
+  margin: 0 22px 18px;
+  padding: 16px;
+  border-radius: 22px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.runs-panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.runs-panel-head h3 {
+  margin: 4px 0 0;
+  font-size: 1rem;
+}
+
+.runs-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-soft);
+  font-size: 0.85rem;
+}
+
+.runs-list {
+  display: grid;
+  gap: 10px;
+}
+
+.run-card {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.88);
+  padding: 12px 14px;
+}
+
+.run-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.run-card-time,
+.run-card-meta {
+  color: var(--text-soft);
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.run-card-meta {
+  margin-top: 8px;
+}
+
+.run-card-error {
+  margin-top: 8px;
+  color: var(--bad);
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.runs-empty {
+  padding: 18px;
+}
+
 .main-grid {
   display: grid;
   grid-template-columns: minmax(380px, 530px) minmax(0, 1fr);
@@ -939,6 +1015,7 @@ img {
   .filter-row,
   .saved-list,
   .editor-content,
+  .runs-panel,
   .results-card > .table-wrap,
   .results-card > .empty-state,
   .results-card > .error-box,

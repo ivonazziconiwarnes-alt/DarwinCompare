@@ -1,65 +1,8 @@
 import { NextResponse } from 'next/server'
 import { isAuthenticatedRequest } from '@/lib/auth'
+import { emptyManual, mapComparison, readComparisonWithCompetitors } from '@/lib/comparison-store'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import type { ComparisonRecord, CompetitorRecord, SavedComparison } from '@/lib/types'
-
-function emptyManual() {
-  return {
-    title: '',
-    price: '',
-    itemId: '',
-    imageUrl: '',
-    currency: 'ARS',
-  }
-}
-
-function mapComparison(record: ComparisonRecord, competitors: CompetitorRecord[]): SavedComparison {
-  return {
-    id: record.id,
-    name: record.name,
-    category: record.category,
-    myName: record.my_name,
-    myUrl: record.my_url,
-    myManual: record.my_manual || emptyManual(),
-    createdAt: record.created_at,
-    updatedAt: record.updated_at,
-    lastResult: record.last_result,
-    syncStatus: record.sync_status || 'pending',
-    lastSyncedAt: record.last_synced_at || null,
-    syncError: record.sync_error || null,
-    competitors: competitors
-      .sort((a, b) => a.position - b.position)
-      .map((competitor) => ({
-        id: competitor.id,
-        name: competitor.name,
-        url: competitor.url,
-        position: competitor.position,
-        manualOverride: competitor.manual_override || emptyManual(),
-      })),
-  }
-}
-
-async function readOne(id: string) {
-  const supabase = getSupabaseAdmin()
-
-  const { data: comparisonRow, error: comparisonError } = await supabase
-    .from('comparisons')
-    .select('*')
-    .eq('id', id)
-    .single()
-
-  if (comparisonError) throw comparisonError
-
-  const { data: competitorRows, error: competitorError } = await supabase
-    .from('comparison_competitors')
-    .select('*')
-    .eq('comparison_id', id)
-    .order('position', { ascending: true })
-
-  if (competitorError) throw competitorError
-
-  return mapComparison(comparisonRow as ComparisonRecord, (competitorRows || []) as CompetitorRecord[])
-}
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   if (!isAuthenticatedRequest(request)) {
@@ -68,7 +11,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
   try {
     const { id } = await params
-    const item = await readOne(id)
+    const item = await readComparisonWithCompetitors(getSupabaseAdmin(), id)
     return NextResponse.json({ item })
   } catch (error) {
     return NextResponse.json(
