@@ -256,16 +256,21 @@ export async function scrapeListingWithBrowserless(sourceUrl: string, itemId: st
   }
 
   let lastError: string | null = null
-  const browser = await chromium.connectOverCDP(wsUrl)
-  const context = await browser.newContext({
-    viewport: { width: 1440, height: 1200 },
-    userAgent:
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36',
-    locale: 'es-AR',
-  })
-  const page = await context.newPage()
+  let browser: Awaited<ReturnType<typeof chromium.connectOverCDP>> | null = null
+  let context: Awaited<ReturnType<Awaited<ReturnType<typeof chromium.connectOverCDP>>['newContext']>> | null = null
+  let page: Awaited<ReturnType<Awaited<ReturnType<Awaited<ReturnType<typeof chromium.connectOverCDP>>['newContext']>>['newPage']>> | null =
+    null
 
   try {
+    browser = await chromium.connectOverCDP(wsUrl)
+    context = await browser.newContext({
+      viewport: { width: 1440, height: 1200 },
+      userAgent:
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36',
+      locale: 'es-AR',
+    })
+    page = await context.newPage()
+
     for (const url of tries) {
       try {
         await page.goto(url, {
@@ -282,9 +287,15 @@ export async function scrapeListingWithBrowserless(sourceUrl: string, itemId: st
         lastError = error instanceof Error ? error.message : 'Browserless error'
       }
     }
+  } catch (error) {
+    lastError = error instanceof Error ? error.message : 'Browserless error'
   } finally {
-    await context.close()
-    await browser.close()
+    if (context) {
+      await context.close().catch(() => {})
+    }
+    if (browser) {
+      await browser.close().catch(() => {})
+    }
   }
 
   return {

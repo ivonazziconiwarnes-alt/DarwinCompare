@@ -107,6 +107,13 @@ function isHttpUrl(value: string | null | undefined) {
   return /^https?:\/\//i.test(value || '')
 }
 
+function pushUniqueUrl(list: string[], seen: Set<string>, candidate: string | null | undefined) {
+  const normalized = (candidate || '').trim()
+  if (!normalized || seen.has(normalized)) return
+  seen.add(normalized)
+  list.push(normalized)
+}
+
 function extractItemCandidates(value: unknown) {
   if (!value) return [] as string[]
 
@@ -146,6 +153,21 @@ function extractItemCandidates(value: unknown) {
 function extractItemId(value: unknown) {
   const candidates = extractItemCandidates(value)
   return candidates.find((candidate) => /^MLA\d+$/i.test(candidate)) || candidates[0] || null
+}
+
+function buildWebCandidates(sourceUrl: string, itemCandidates: string[]) {
+  const urls: string[] = []
+  const seen = new Set<string>()
+
+  if (isHttpUrl(sourceUrl)) {
+    pushUniqueUrl(urls, seen, sourceUrl)
+  }
+
+  itemCandidates.forEach((candidate) => {
+    pushUniqueUrl(urls, seen, buildPublicUrl(candidate))
+  })
+
+  return urls
 }
 
 function metaContent($: ReturnType<typeof load>, key: string) {
@@ -488,11 +510,11 @@ async function resolveListing(itemId: string | null, sourceUrl: string) {
   const candidates = new Set<string>()
   if (itemId) candidates.add(itemId.toUpperCase())
   extractItemCandidates(sourceUrl).forEach((candidate) => candidates.add(candidate.toUpperCase()))
+  const orderedCandidates = [...candidates]
 
   const debug: string[] = []
 
-  const webUrl = isHttpUrl(sourceUrl) ? sourceUrl : buildPublicUrl(itemId)
-  if (webUrl) {
+  for (const webUrl of buildWebCandidates(sourceUrl, orderedCandidates)) {
     const scraped = await scrapeListing(webUrl)
     if (scraped.data) {
       scraped.data.itemId = scraped.data.itemId || itemId
@@ -501,7 +523,7 @@ async function resolveListing(itemId: string | null, sourceUrl: string) {
     if (scraped.error) debug.push(scraped.error)
   }
 
-  for (const candidate of candidates) {
+  for (const candidate of orderedCandidates) {
     const apiResult = await fetchApiListing(candidate, sourceUrl)
     if (apiResult.data) return apiResult
     if (apiResult.error) debug.push(apiResult.error)
