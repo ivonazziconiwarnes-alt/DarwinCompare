@@ -520,6 +520,9 @@ export async function runWebComparison(comparison: SavedComparison): Promise<Run
   const myUrl = comparison.myUrl?.trim() || ''
   const myManual = comparison.myManual
   const competitors = comparison.competitors || []
+  const previousRows = comparison.lastResult?.rows || []
+  const previousMineUrl = previousRows.find((row) => row.role === 'mine')?.url || ''
+  const previousCompetitorRows = previousRows.filter((row) => row.role === 'competitor')
 
   const myItemId = extractItemId(myUrl) || extractItemId(myManual?.itemId)
   if (!myItemId) {
@@ -527,14 +530,15 @@ export async function runWebComparison(comparison: SavedComparison): Promise<Run
   }
 
   const rows: CompareRow[] = []
+  const mySourceUrl = isHttpUrl(myUrl) ? myUrl : previousMineUrl || myUrl
 
-  const myResult = await resolveListing(myItemId, myUrl)
+  const myResult = await resolveListing(myItemId, mySourceUrl)
   rows.push(
     applyManualOverride(
       buildRow({
         role: 'mine',
         name: myName,
-        sourceUrl: myUrl,
+        sourceUrl: mySourceUrl,
         itemId: myItemId,
         itemData: myResult.data,
         error: myResult.error,
@@ -545,9 +549,12 @@ export async function runWebComparison(comparison: SavedComparison): Promise<Run
 
   for (const [index, competitor] of competitors.entries()) {
     const label = competitor.name?.trim() || `Competidor ${index + 1}`
-    const sourceUrl = competitor.url?.trim() || ''
+    const rawSourceUrl = competitor.url?.trim() || ''
+    const previousUrl = previousCompetitorRows[index]?.url || ''
+    const sourceUrl = isHttpUrl(rawSourceUrl) ? rawSourceUrl : previousUrl || rawSourceUrl
     const manualOverride = competitor.manualOverride
-    const competitorItemId = extractItemId(sourceUrl) || extractItemId(manualOverride?.itemId)
+    const competitorItemId =
+      extractItemId(rawSourceUrl) || extractItemId(previousUrl) || extractItemId(manualOverride?.itemId)
     const resolved = await resolveListing(competitorItemId, sourceUrl)
 
     rows.push(
