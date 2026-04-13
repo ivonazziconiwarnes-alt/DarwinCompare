@@ -834,7 +834,11 @@ export default function HomePage() {
           </section>
 
           {error ? <div className="error-box">{error}</div> : null}
-          {selected?.syncError ? <div className="error-box">{selected.syncError}</div> : null}
+          {selected?.syncError ? (
+            <div className={selected.syncStatus === 'ok' ? 'notice-box' : 'error-box'}>
+              {selected.syncError}
+            </div>
+          ) : null}
 
           {!selected ? (
             <section className="card empty-state large">

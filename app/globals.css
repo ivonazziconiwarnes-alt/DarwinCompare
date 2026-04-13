@@ -883,6 +883,15 @@ img {
   border: 1px solid #ffd6d6;
 }
 
+.notice-box {
+  margin-bottom: 22px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: #fff8e7;
+  color: #8a5b00;
+  border: 1px solid #f2d38c;
+}
+
 .image-modal {
   position: fixed;
   inset: 0;

@@ -144,22 +144,35 @@ async function finishRunRecord(
 
 async function updateComparisonState(
   supabase: any,
-  comparisonId: string,
+  comparison: SavedComparison,
   result: CompareResponse,
   status: 'ok' | 'error',
   errorMessage: string | null,
   finishedAt: string,
 ) {
+  const preservePreviousResult =
+    status === 'error' &&
+    Array.isArray(comparison.lastResult?.rows) &&
+    comparison.lastResult.rows.length > 0
+
+  const updatePayload = preservePreviousResult
+    ? {
+        sync_status: status,
+        sync_error: errorMessage,
+        updated_at: finishedAt,
+      }
+    : {
+        last_result: result,
+        sync_status: status,
+        sync_error: errorMessage,
+        last_synced_at: finishedAt,
+        updated_at: finishedAt,
+      }
+
   const { error } = await supabase
     .from('comparisons')
-    .update({
-      last_result: result,
-      sync_status: status,
-      sync_error: errorMessage,
-      last_synced_at: finishedAt,
-      updated_at: finishedAt,
-    })
-    .eq('id', comparisonId)
+    .update(updatePayload)
+    .eq('id', comparison.id)
 
   if (error) throw error
 }
@@ -200,7 +213,7 @@ export async function executeComparisonRefresh(
   }
 
   const finishedAt = new Date().toISOString()
-  await updateComparisonState(supabase, comparisonId, result, status, errorMessage, finishedAt)
+  await updateComparisonState(supabase, comparison, result, status, errorMessage, finishedAt)
   const finishedRun = await finishRunRecord(supabase, runRecord, result, status, errorMessage, finishedAt)
   const refreshed = await readComparisonWithCompetitors(supabase, comparisonId)
 
