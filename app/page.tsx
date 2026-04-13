@@ -125,7 +125,7 @@ function syncLabel(status: 'pending' | 'running' | 'ok' | 'error') {
   if (status === 'ok') return 'Actualizada'
   if (status === 'running') return 'Ejecutando'
   if (status === 'error') return 'Error'
-  return 'En cola'
+  return 'Sin actualizar'
 }
 
 function syncClass(status: 'pending' | 'running' | 'ok' | 'error') {
@@ -139,7 +139,7 @@ function runStatusCopy(run: ComparisonRun) {
   if (run.status === 'ok') return 'Completada'
   if (run.status === 'running') return 'En ejecucion'
   if (run.status === 'error') return 'Fallida'
-  return 'En cola'
+  return 'Pendiente'
 }
 
 export default function HomePage() {
@@ -261,7 +261,7 @@ export default function HomePage() {
   }, [loggedIn, selectedId])
 
   useEffect(() => {
-    if (!loggedIn || !selectedId || !selected || !['pending', 'running'].includes(selected.syncStatus)) return
+    if (!loggedIn || !selectedId || !selected || selected.syncStatus !== 'running') return
 
     const timer = window.setInterval(() => {
       void loadComparisons(selectedId)
@@ -545,8 +545,8 @@ export default function HomePage() {
         }))
         .filter((item) => item.url)
 
-      if (!selected.myUrl.trim()) throw new Error('Ingresá el MLA de tu publicación.')
-      if (!competitors.length) throw new Error('Agregá al menos un competidor con URL.')
+      if (!selected.myUrl.trim()) throw new Error('Ingresa el MLA de tu publicacion.')
+      if (!competitors.length) throw new Error('Agrega al menos un competidor con URL.')
 
       const queueRes = await fetch(`/api/comparisons/${selected.id}/enqueue`, {
         method: 'POST',
@@ -558,14 +558,14 @@ export default function HomePage() {
       }
 
       const queueJson = await queueRes.json()
-      if (!queueRes.ok) throw new Error(queueJson.error || 'No se pudo encolar la actualización.')
+      if (!queueRes.ok) throw new Error(queueJson.error || 'No se pudo actualizar la comparacion.')
 
       await loadComparisons(selected.id)
       await loadRuns(selected.id)
       return
 
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo encolar la actualización.')
+      setError(err instanceof Error ? err.message : 'No se pudo actualizar la comparacion.')
     } finally {
       setLoadingCompare(false)
     }
@@ -761,7 +761,7 @@ export default function HomePage() {
                       {selected.lastSyncedAt ? ` · ${prettyDate(selected.lastSyncedAt)}` : ''}
                     </div>
                     <div className="toolbar-note">
-                      La web queda como panel central: guardás acá, encolás una corrida y el worker publica el resultado.
+                      La web hace todo: guardas aca, actualizas aca y el resultado queda publicado al terminar.
                     </div>
                   </>
                 ) : null}
@@ -783,7 +783,7 @@ export default function HomePage() {
                       {loadingCompare ? (
                         <>
                           <Loader2 size={16} className="spin" />
-                          Encolando...
+                          Actualizando...
                         </>
                       ) : (
                         <>
@@ -996,7 +996,6 @@ export default function HomePage() {
                             {run.resultSummary
                               ? `${run.resultSummary.ok}/${run.resultSummary.total} con datos`
                               : 'Esperando resultado'}
-                            {run.workerId ? ` · ${run.workerId}` : ''}
                           </div>
                           {run.error ? <div className="run-card-error">{run.error}</div> : null}
                         </article>
@@ -1173,7 +1172,7 @@ export default function HomePage() {
                 ) : (
                   <div className="empty-state large">
                     <RefreshCw size={20} />
-                    Guardá los cambios, encolá una corrida y dejá que el worker publique el resultado.
+                    Guarda los cambios o toca Actualizar ahora para correr la comparacion desde la web.
                   </div>
                 )}
               </section>

@@ -1,57 +1,34 @@
-# Comparador ML Web + Worker
+# Comparador ML Web
 
-Esta version deja la arquitectura en modo `web-first`.
+Esta version queda lista para trabajar 100% web.
 
-## Como queda armado
+## Como funciona
 
-### Web
-
-La app web queda como panel central para:
+La app web hace todo desde Next.js:
 
 - login
 - alta y edicion de comparaciones
-- cola de ejecucion
-- ultimo resultado
-- historial de corridas
+- lectura de Mercado Libre por API publica
+- fallback web cuando hace falta
+- fallback remoto con Browserless si ML bloquea el acceso simple
+- guardado del ultimo resultado
+- historial de corridas cuando la tabla existe
 - exportacion a Excel
 
-### Worker Python
+## Flujo de uso
 
-El motor real de actualizacion vive en `C:\FINAL\Comparacion MELI\web_compare_worker.py`.
+1. Ingresas al panel.
+2. Creas o editas una comparacion.
+3. Guardas si hiciste cambios.
+4. Tocas `Actualizar ahora`.
+5. La API ejecuta la comparacion en ese mismo momento.
+6. El resultado vuelve a Supabase y aparece en pantalla.
 
-Ese worker:
-
-- toma jobs desde la web
-- usa la logica de Mercado Libre
-- intenta API publica
-- intenta API autenticada si hace falta
-- usa Playwright al final como fallback
-- devuelve el resultado a la web
-
-### Supabase
-
-Supabase queda como fuente central para:
-
-- comparaciones
-- competidores
-- ultimo resultado
-- historial de corridas
-- filas de cada corrida
-
-## Flujo final
-
-1. El usuario crea o edita una comparacion desde la web.
-2. La web guarda todo en Supabase.
-3. El usuario toca `Actualizar ahora`.
-4. Se crea una corrida en cola.
-5. El worker reclama la corrida.
-6. El worker ejecuta la comparacion real.
-7. El worker guarda resumen y filas.
-8. La web muestra estado, historial y ultimo resultado.
+No hace falta un worker Python ni una app local prendida.
 
 ## Variables de entorno
 
-Usar `.env.local` con estas variables:
+Configura estas variables en `.env.local` o en Vercel:
 
 ```env
 SUPABASE_URL=https://TU-PROYECTO.supabase.co
@@ -61,62 +38,31 @@ APP_USERNAME=TU_USUARIO
 APP_PASSWORD=TU_PASSWORD
 APP_SESSION_SECRET=TU_SECRETO_DE_SESSION
 
-DESKTOP_SYNC_TOKEN=TOKEN_PARA_SYNC_DESKTOP
-WORKER_SYNC_TOKEN=TOKEN_PARA_WORKER
+# Opcional pero recomendado
+BROWSERLESS_TOKEN=TU_BROWSERLESS_TOKEN
+BROWSERLESS_REGION=production-sfo
 ```
 
-Nota:
+Tambien puedes usar `SUPABASE_SERVICE_ROLE_KEY` en lugar de `SUPABASE_SECRET_KEY`.
 
-- `WORKER_SYNC_TOKEN` puede ser el mismo valor que `DESKTOP_SYNC_TOKEN` si queres simplificar.
-- la UI ya no viene precompletada con credenciales hardcodeadas.
+## Supabase
 
-## SQL
+El archivo `supabase/worker_schema.sql` sigue siendo util porque crea el historial de corridas:
 
-Aplicar el script:
-
-- `supabase/worker_schema.sql`
-
-Ese script crea o completa:
-
-- `comparisons`
-- `comparison_competitors`
 - `comparison_runs`
 - `comparison_run_rows`
 
-## Worker
+Si ya tienes solo las tablas base (`comparisons` y `comparison_competitors`), la app igual funciona.
+Simplemente no mostrara historial hasta que apliques ese SQL.
 
-### Ejecutar una sola vez
-
-```bash
-python C:\FINAL\Comparacion MELI\web_compare_worker.py --once
-```
-
-### Ejecutar en loop
+## Desarrollo local
 
 ```bash
-python C:\FINAL\Comparacion MELI\web_compare_worker.py
+npm run dev
 ```
 
-### Abrir login manual de ML
+## Build
 
 ```bash
-python C:\FINAL\Comparacion MELI\web_compare_worker.py --open-login
+npm run build
 ```
-
-## Estado del compare legacy
-
-La ruta `/api/compare` queda deshabilitada a proposito.
-
-La arquitectura nueva ya no usa comparacion directa desde Next.js.
-Ahora el camino correcto es:
-
-- guardar
-- encolar corrida
-- procesar con worker
-
-## Build validado
-
-Se valido:
-
-- `npm.cmd run build`
-- `python -m py_compile C:\FINAL\Comparacion MELI\web_compare_worker.py`

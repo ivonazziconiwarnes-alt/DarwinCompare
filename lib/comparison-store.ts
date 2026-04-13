@@ -9,6 +9,38 @@ import type {
   CompareRow,
 } from '@/lib/types'
 
+function errorText(error: unknown) {
+  if (!error || typeof error !== 'object') return ''
+  const record = error as Record<string, unknown>
+  return [record.code, record.message, record.details, record.hint].filter(Boolean).join(' ').toLowerCase()
+}
+
+export function isMissingRunHistoryError(error: unknown) {
+  const text = errorText(error)
+  if (!text) return false
+
+  const mentionsRuns =
+    text.includes('comparison_runs') ||
+    text.includes('comparison_run_rows') ||
+    text.includes('comparison_snapshot') ||
+    text.includes('result_summary') ||
+    text.includes('worker_id') ||
+    text.includes('started_at') ||
+    text.includes('finished_at') ||
+    text.includes('relation') ||
+    text.includes('schema cache')
+
+  const missingSignals =
+    text.includes('42p01') ||
+    text.includes('42703') ||
+    text.includes('pgrst205') ||
+    text.includes('does not exist') ||
+    text.includes('could not find') ||
+    text.includes('not found in the schema cache')
+
+  return mentionsRuns && missingSignals
+}
+
 function asNumber(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) return value
   if (typeof value === 'string' && value.trim()) {
@@ -166,7 +198,10 @@ export async function listRunsForComparison(supabase: any, comparisonId: string,
     .order('requested_at', { ascending: false })
     .limit(limit)
 
-  if (runError) throw runError
+  if (runError) {
+    if (isMissingRunHistoryError(runError)) return []
+    throw runError
+  }
 
   const runIds = (runRows || []).map((row: any) => row.id)
   const rowsByRun = new Map<string, ComparisonRunRowRecord[]>()
@@ -178,13 +213,15 @@ export async function listRunsForComparison(supabase: any, comparisonId: string,
       .in('run_id', runIds)
       .order('position', { ascending: true })
 
-    if (detailError) throw detailError
-
-    ;(detailRows || []).forEach((row: any) => {
-      const list = rowsByRun.get(row.run_id) || []
-      list.push(row as ComparisonRunRowRecord)
-      rowsByRun.set(row.run_id, list)
-    })
+    if (detailError) {
+      if (!isMissingRunHistoryError(detailError)) throw detailError
+    } else {
+      ;(detailRows || []).forEach((row: any) => {
+        const list = rowsByRun.get(row.run_id) || []
+        list.push(row as ComparisonRunRowRecord)
+        rowsByRun.set(row.run_id, list)
+      })
+    }
   }
 
   return (runRows || []).map((row: any) =>
