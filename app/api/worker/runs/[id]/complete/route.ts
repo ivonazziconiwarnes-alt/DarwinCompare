@@ -133,6 +133,19 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       updateRunError = fallbackUpdateRunError
     }
 
+    if (updateRunError && isMissingColumnError(updateRunError)) {
+      const { error: minimalUpdateRunError } = await supabase
+        .from('comparison_runs')
+        .update({
+          status,
+          worker_id: workerId,
+          error: body.error || null,
+        })
+        .eq('id', id)
+
+      updateRunError = minimalUpdateRunError
+    }
+
     if (updateRunError) throw updateRunError
 
     const { data: comparisonRow, error: comparisonReadError } = await supabase

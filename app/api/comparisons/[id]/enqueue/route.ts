@@ -5,6 +5,7 @@ import { getSupabaseAdmin } from '@/lib/supabase-admin'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
+const STALE_RUN_MINUTES = 20
 
 function errorText(error: unknown) {
   if (error instanceof Error) return error.message
@@ -37,17 +38,37 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const supabase = getSupabaseAdmin()
     const requestedBy = authenticatedUsername(request)
     const queuedAt = new Date().toISOString()
+    const staleBefore = new Date(Date.now() - STALE_RUN_MINUTES * 60 * 1000).toISOString()
 
     const { data: existingRuns, error: existingRunError } = await supabase
       .from('comparison_runs')
-      .select('id, status')
+      .select('id, status, requested_at, started_at')
       .eq('comparison_id', id)
       .in('status', ['pending', 'running'])
       .order('requested_at', { ascending: false })
       .limit(1)
 
     if (existingRunError) throw existingRunError
-    const existingRun = Array.isArray(existingRuns) ? existingRuns[0] || null : null
+    let existingRun = Array.isArray(existingRuns) ? existingRuns[0] || null : null
+
+    if (existingRun) {
+      const startedAt = String(existingRun.started_at || existingRun.requested_at || '')
+      const isStale = !!startedAt && startedAt < staleBefore
+
+      if (isStale) {
+        const { error: staleRunError } = await supabase
+          .from('comparison_runs')
+          .update({
+            status: 'error',
+            error: 'Corrida anterior cerrada automaticamente por estar trabada.',
+            worker_id: null,
+          })
+          .eq('id', existingRun.id)
+
+        if (staleRunError && !isMissingColumnError(staleRunError)) throw staleRunError
+        existingRun = null
+      }
+    }
 
     if (!existingRun) {
       const snapshot = await readComparisonWithCompetitors(supabase, id)
