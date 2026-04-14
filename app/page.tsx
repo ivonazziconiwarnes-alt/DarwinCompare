@@ -142,6 +142,22 @@ function runStatusCopy(run: ComparisonRun) {
   return 'Pendiente'
 }
 
+async function readApiPayload(res: Response) {
+  const text = await res.text()
+  if (!text) return {}
+
+  try {
+    return JSON.parse(text) as Record<string, any>
+  } catch {
+    return {
+      error:
+        text.length > 220
+          ? `${text.slice(0, 220).trim()}...`
+          : text.trim(),
+    }
+  }
+}
+
 export default function HomePage() {
   const [items, setItems] = useState<SavedComparison[]>([])
   const [runs, setRuns] = useState<ComparisonRun[]>([])
@@ -167,7 +183,7 @@ export default function HomePage() {
     setCheckingSession(true)
     try {
       const res = await fetch('/api/auth/session', { cache: 'no-store' })
-      const json = await res.json()
+      const json = await readApiPayload(res)
       const authenticated = Boolean(json.authenticated)
       setLoggedIn(authenticated)
       if (authenticated) {
@@ -199,7 +215,7 @@ export default function HomePage() {
         return
       }
 
-      const json = await res.json()
+      const json = await readApiPayload(res)
       if (!res.ok) throw new Error(json.error || 'No se pudieron leer las comparaciones.')
 
       const next = (json.items as SavedComparison[]).map(hydrateComparison)
@@ -238,7 +254,7 @@ export default function HomePage() {
         return
       }
 
-      const json = await res.json()
+      const json = await readApiPayload(res)
       if (!res.ok) throw new Error(json.error || 'No se pudieron leer las ejecuciones.')
       setRuns((json.items as ComparisonRun[]) || [])
     } catch (err) {
@@ -327,7 +343,7 @@ export default function HomePage() {
         body: JSON.stringify({ username: loginUser, password: loginPassword }),
       })
 
-      const json = await res.json()
+      const json = await readApiPayload(res)
       if (!res.ok) throw new Error(json.error || 'No se pudo iniciar sesión.')
 
       setLoggedIn(true)
@@ -368,7 +384,7 @@ export default function HomePage() {
         return
       }
 
-      const json = await res.json()
+      const json = await readApiPayload(res)
       if (!res.ok) throw new Error(json.error || 'No se pudo crear la comparación.')
 
       const item = hydrateComparison(json.item as SavedComparison)
@@ -400,7 +416,7 @@ export default function HomePage() {
         return
       }
 
-      const json = await res.json()
+      const json = await readApiPayload(res)
       if (!res.ok) throw new Error(json.error || 'No se pudo guardar la comparación.')
 
       const item = hydrateComparison(json.item as SavedComparison)
@@ -448,7 +464,7 @@ export default function HomePage() {
         return
       }
 
-      const json = await res.json()
+      const json = await readApiPayload(res)
       if (!res.ok) throw new Error(json.error || 'No se pudo duplicar la comparación.')
 
       const item = hydrateComparison(json.item as SavedComparison)
@@ -476,7 +492,7 @@ export default function HomePage() {
         return
       }
 
-      const json = await res.json().catch(() => ({}))
+      const json = await readApiPayload(res)
       if (!res.ok) throw new Error(json.error || 'No se pudo borrar la comparación.')
 
       const next = items.filter((item) => item.id !== selected.id)
@@ -557,7 +573,7 @@ export default function HomePage() {
         return
       }
 
-      const queueJson = await queueRes.json()
+      const queueJson = await readApiPayload(queueRes)
       if (!queueRes.ok) throw new Error(queueJson.error || 'No se pudo actualizar la comparacion.')
 
       await loadComparisons(selected.id)
@@ -587,7 +603,7 @@ export default function HomePage() {
       }
 
       if (!res.ok) {
-        const json = await res.json().catch(() => null)
+        const json = await readApiPayload(res)
         throw new Error(json?.error || 'No se pudo exportar.')
       }
 

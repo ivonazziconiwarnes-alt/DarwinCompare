@@ -11,7 +11,8 @@ type ListingData = {
 }
 
 const ITEM_ID_RE = /(MLA\d+)/i
-const BROWSERLESS_TIMEOUT_MS = 12000
+const BROWSERLESS_TIMEOUT_MS = 7000
+const BROWSERLESS_TOTAL_BUDGET_MS = 14000
 
 function extractItemId(value: string | null | undefined) {
   if (!value) return null
@@ -114,9 +115,6 @@ function candidateUrls(sourceUrl: string, itemId: string | null) {
   if (itemId) {
     const digits = itemId.replace(/^MLA/i, '')
     list.push(`https://articulo.mercadolibre.com.ar/MLA-${digits}-_JM`)
-    list.push(`https://listado.mercadolibre.com.ar/?item_id=${itemId}`)
-    list.push(`https://listado.mercadolibre.com.ar/?pdp_filters=item_id:${itemId}`)
-    list.push(`https://listado.mercadolibre.com.ar/${itemId}`)
   }
 
   return [...new Set(list.filter(Boolean))]
@@ -289,8 +287,10 @@ export async function scrapeListingWithBrowserless(sourceUrl: string, itemId: st
         locale: 'es-AR',
       })
       page = await context.newPage()
+      const startedAt = Date.now()
 
       for (const url of tries) {
+        if (Date.now() - startedAt > BROWSERLESS_TOTAL_BUDGET_MS) break
         try {
           await page.goto(url, {
             waitUntil: 'domcontentloaded',
