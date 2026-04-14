@@ -1,10 +1,11 @@
-import { NextResponse } from 'next/server'
+import { after, NextResponse } from 'next/server'
 import { authenticatedUsername, isAuthenticatedRequest } from '@/lib/auth'
+import { readComparisonWithCompetitors } from '@/lib/comparison-store'
 import { executeComparisonRefresh } from '@/lib/comparison-runner'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 
 export const runtime = 'nodejs'
-export const maxDuration = 60
+export const maxDuration = 300
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   if (!isAuthenticatedRequest(request)) {
@@ -13,17 +14,44 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
   try {
     const { id } = await params
-    const execution = await executeComparisonRefresh(
-      getSupabaseAdmin(),
-      id,
-      authenticatedUsername(request),
-    )
+    const supabase = getSupabaseAdmin()
+    const requestedBy = authenticatedUsername(request)
+    const queuedAt = new Date().toISOString()
+
+    const { error: queueError } = await supabase
+      .from('comparisons')
+      .update({
+        sync_status: 'running',
+        sync_error: null,
+        updated_at: queuedAt,
+      })
+      .eq('id', id)
+
+    if (queueError) throw queueError
+
+    const queuedItem = await readComparisonWithCompetitors(supabase, id)
+
+    after(async () => {
+      try {
+        await executeComparisonRefresh(supabase, id, requestedBy)
+      } catch (error) {
+        const failedAt = new Date().toISOString()
+        await supabase
+          .from('comparisons')
+          .update({
+            sync_status: 'error',
+            sync_error: error instanceof Error ? error.message : 'No se pudo actualizar la comparacion.',
+            updated_at: failedAt,
+          })
+          .eq('id', id)
+      }
+    })
 
     return NextResponse.json({
-      item: execution.comparison,
-      run: execution.run,
-      result: execution.result,
-      status: execution.status,
+      item: queuedItem,
+      run: null,
+      result: queuedItem.lastResult,
+      status: 'queued',
     })
   } catch (error) {
     return NextResponse.json(
