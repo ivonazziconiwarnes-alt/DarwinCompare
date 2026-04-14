@@ -17,16 +17,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const requestedBy = authenticatedUsername(request)
     const queuedAt = new Date().toISOString()
 
-    const { data: existingRun, error: existingRunError } = await supabase
+    const { data: existingRuns, error: existingRunError } = await supabase
       .from('comparison_runs')
       .select('id, status')
       .eq('comparison_id', id)
       .in('status', ['pending', 'running'])
       .order('requested_at', { ascending: false })
       .limit(1)
-      .maybeSingle()
 
     if (existingRunError) throw existingRunError
+    const existingRun = Array.isArray(existingRuns) ? existingRuns[0] || null : null
 
     if (!existingRun) {
       const snapshot = await readComparisonWithCompetitors(supabase, id)
