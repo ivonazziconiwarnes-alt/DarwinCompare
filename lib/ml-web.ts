@@ -542,10 +542,6 @@ function buildRow(args: {
   }
 }
 
-async function resolveListing(itemId: string | null, sourceUrl: string) {
-  return resolveListingWithOptions(itemId, sourceUrl, { allowBrowserless: true })
-}
-
 async function resolveListingWithOptions(
   itemId: string | null,
   sourceUrl: string,
@@ -623,7 +619,7 @@ export async function runWebComparison(comparison: SavedComparison): Promise<Run
   const mySourceUrl = isHttpUrl(myUrl) ? myUrl : previousMineUrl || myUrl
 
   const myResult = await resolveListingWithOptions(myItemId, mySourceUrl, {
-    allowBrowserless: !previousMineRow,
+    allowBrowserless: true,
   })
   rows.push(
     buildCachedRowFallback(
@@ -653,7 +649,7 @@ export async function runWebComparison(comparison: SavedComparison): Promise<Run
         extractItemId(rawSourceUrl) || extractItemId(previousUrl) || extractItemId(manualOverride?.itemId)
       const previousRow = previousCompetitorRows[index]
       const resolved = await resolveListingWithOptions(competitorItemId, sourceUrl, {
-        allowBrowserless: !previousRow,
+        allowBrowserless: true,
       })
 
       return buildCachedRowFallback(
