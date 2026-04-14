@@ -638,8 +638,8 @@ export async function runWebComparison(comparison: SavedComparison): Promise<Run
     ),
   )
 
-  const competitorRows = await Promise.all(
-    competitors.map(async (competitor, index) => {
+  const competitorRows: CompareRow[] = []
+  for (const [index, competitor] of competitors.entries()) {
       const label = competitor.name?.trim() || `Competidor ${index + 1}`
       const rawSourceUrl = competitor.url?.trim() || ''
       const previousUrl = previousCompetitorRows[index]?.url || ''
@@ -652,7 +652,8 @@ export async function runWebComparison(comparison: SavedComparison): Promise<Run
         allowBrowserless: true,
       })
 
-      return buildCachedRowFallback(
+      competitorRows.push(
+        buildCachedRowFallback(
         applyManualOverride(
           buildRow({
             role: 'competitor',
@@ -665,9 +666,9 @@ export async function runWebComparison(comparison: SavedComparison): Promise<Run
           manualOverride,
         ),
         previousRow,
+      ),
       )
-    }),
-  )
+  }
 
   rows.push(...competitorRows)
 

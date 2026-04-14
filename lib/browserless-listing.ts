@@ -13,6 +13,8 @@ type ListingData = {
 const ITEM_ID_RE = /(MLA\d+)/i
 const BROWSERLESS_TIMEOUT_MS = 7000
 const BROWSERLESS_TOTAL_BUDGET_MS = 14000
+const BROWSERLESS_RATE_LIMIT_MESSAGE =
+  'Browserless quedo limitado por tasa (429). Reintentemos en unos segundos.'
 
 function extractItemId(value: string | null | undefined) {
   if (!value) return null
@@ -303,11 +305,13 @@ export async function scrapeListingWithBrowserless(sourceUrl: string, itemId: st
           if (extracted.data) return extracted
           lastError = extracted.error || lastError
         } catch (error) {
-          lastError = error instanceof Error ? error.message : 'Browserless error'
+          const message = error instanceof Error ? error.message : 'Browserless error'
+          lastError = message.includes('429 Too Many Requests') ? BROWSERLESS_RATE_LIMIT_MESSAGE : message
         }
       }
     } catch (error) {
-      lastError = error instanceof Error ? error.message : 'Browserless error'
+      const message = error instanceof Error ? error.message : 'Browserless error'
+      lastError = message.includes('429 Too Many Requests') ? BROWSERLESS_RATE_LIMIT_MESSAGE : message
     } finally {
       if (context) {
         await context.close().catch(() => {})
