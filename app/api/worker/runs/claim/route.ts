@@ -9,6 +9,20 @@ type ClaimResponse = {
   comparison: SavedComparison | null
 }
 
+function errorToText(error: unknown) {
+  if (error instanceof Error) return error.message
+
+  if (error && typeof error === 'object') {
+    try {
+      return JSON.stringify(error)
+    } catch {
+      return String(error)
+    }
+  }
+
+  return String(error || 'Error desconocido')
+}
+
 export async function POST(request: Request) {
   if (!isWorkerRequest(request)) {
     return NextResponse.json({ error: 'No autorizado para worker.' }, { status: 401 })
@@ -74,7 +88,9 @@ export async function POST(request: Request) {
     })
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'No se pudo reclamar un job.' },
+      {
+        error: errorToText(error),
+      },
       { status: 500 },
     )
   }
