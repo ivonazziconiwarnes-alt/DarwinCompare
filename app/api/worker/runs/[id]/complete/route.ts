@@ -10,6 +10,27 @@ type CompletePayload = {
   result?: CompareResponse | null
 }
 
+function errorText(error: unknown) {
+  if (error instanceof Error) return error.message
+
+  if (error && typeof error === 'object') {
+    const record = error as Record<string, unknown>
+    return [record.code, record.message, record.details, record.hint].filter(Boolean).join(' ')
+  }
+
+  return String(error || 'Error desconocido')
+}
+
+function isMissingColumnError(error: unknown) {
+  const text = errorText(error).toLowerCase()
+  return (
+    text.includes('42703') ||
+    text.includes('pgrst204') ||
+    (text.includes('column') && text.includes('does not exist')) ||
+    (text.includes('could not find the') && text.includes('column'))
+  )
+}
+
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   if (!isWorkerRequest(request)) {
     return NextResponse.json({ error: 'No autorizado para worker.' }, { status: 401 })
@@ -55,11 +76,37 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         pct: row.pct ?? null,
       }))
 
-      const { error: rowsError } = await supabase.from('comparison_run_rows').insert(payload)
+      let rowsError: unknown = null
+      const { error: fullRowsError } = await supabase.from('comparison_run_rows').insert(payload)
+      rowsError = fullRowsError
+
+      if (rowsError && isMissingColumnError(rowsError)) {
+        const fallbackPayload = normalizedRows.map((row, index) => ({
+          run_id: id,
+          position: index,
+          role: row.role,
+          name: row.name,
+          url: row.url,
+          item_id: row.itemId,
+          title: row.title,
+          price: row.price,
+          currency: row.currency,
+          image_url: row.imageUrl,
+          source: row.source,
+          error: row.error || null,
+        }))
+
+        const { error: fallbackRowsError } = await supabase
+          .from('comparison_run_rows')
+          .insert(fallbackPayload)
+        rowsError = fallbackRowsError
+      }
+
       if (rowsError) throw rowsError
     }
 
-    const { error: updateRunError } = await supabase
+    let updateRunError: unknown = null
+    const { error: fullUpdateRunError } = await supabase
       .from('comparison_runs')
       .update({
         status,
@@ -69,6 +116,22 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         result_summary: result?.summary || null,
       })
       .eq('id', id)
+
+    updateRunError = fullUpdateRunError
+
+    if (updateRunError && isMissingColumnError(updateRunError)) {
+      const { error: fallbackUpdateRunError } = await supabase
+        .from('comparison_runs')
+        .update({
+          status,
+          finished_at: now,
+          worker_id: workerId,
+          error: body.error || null,
+        })
+        .eq('id', id)
+
+      updateRunError = fallbackUpdateRunError
+    }
 
     if (updateRunError) throw updateRunError
 
@@ -111,7 +174,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return NextResponse.json({ ok: true })
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'No se pudo cerrar la ejecución.' },
+      { error: errorText(error) || 'No se pudo cerrar la ejecucion.' },
       { status: 500 },
     )
   }

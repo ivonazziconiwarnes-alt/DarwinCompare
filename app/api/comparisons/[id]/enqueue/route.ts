@@ -6,6 +6,27 @@ import { getSupabaseAdmin } from '@/lib/supabase-admin'
 export const runtime = 'nodejs'
 export const maxDuration = 60
 
+function errorText(error: unknown) {
+  if (error instanceof Error) return error.message
+
+  if (error && typeof error === 'object') {
+    const record = error as Record<string, unknown>
+    return [record.code, record.message, record.details, record.hint].filter(Boolean).join(' ')
+  }
+
+  return String(error || 'Error desconocido')
+}
+
+function isMissingColumnError(error: unknown) {
+  const text = errorText(error).toLowerCase()
+  return (
+    text.includes('42703') ||
+    text.includes('pgrst204') ||
+    text.includes('column') && text.includes('does not exist') ||
+    text.includes('could not find the') && text.includes('column')
+  )
+}
+
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   if (!isAuthenticatedRequest(request)) {
     return NextResponse.json({ error: 'No autorizado. Inicia sesion.' }, { status: 401 })
@@ -30,7 +51,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
     if (!existingRun) {
       const snapshot = await readComparisonWithCompetitors(supabase, id)
-      const { error: insertRunError } = await supabase
+      let insertRunError: unknown = null
+
+      const { error: fullInsertError } = await supabase
         .from('comparison_runs')
         .insert({
           comparison_id: id,
@@ -40,6 +63,20 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
           requested_at: queuedAt,
           comparison_snapshot: snapshot,
         })
+
+      insertRunError = fullInsertError
+
+      if (insertRunError && isMissingColumnError(insertRunError)) {
+        const { error: fallbackInsertError } = await supabase
+          .from('comparison_runs')
+          .insert({
+            comparison_id: id,
+            status: 'pending',
+            requested_at: queuedAt,
+          })
+
+        insertRunError = fallbackInsertError
+      }
 
       if (insertRunError) throw insertRunError
     }
@@ -65,7 +102,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     })
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'No se pudo actualizar la comparacion.' },
+      { error: errorText(error) || 'No se pudo actualizar la comparacion.' },
       { status: 500 },
     )
   }
