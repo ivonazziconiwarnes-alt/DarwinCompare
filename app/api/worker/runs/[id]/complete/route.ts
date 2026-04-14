@@ -90,9 +90,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
           item_id: row.itemId,
           title: row.title,
           price: row.price,
-          currency: row.currency,
-          image_url: row.imageUrl,
-          source: row.source,
           error: row.error || null,
         }))
 
@@ -102,7 +99,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         rowsError = fallbackRowsError
       }
 
-      if (rowsError) throw rowsError
+      if (rowsError && !isMissingColumnError(rowsError)) throw rowsError
     }
 
     let updateRunError: unknown = null
