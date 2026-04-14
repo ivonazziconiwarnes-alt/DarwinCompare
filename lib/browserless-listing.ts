@@ -81,11 +81,29 @@ function cleanupTitle(title: string | null) {
     .trim()
 }
 
-function getBrowserlessWsUrl() {
+function getBrowserlessWsCandidates() {
   const token = process.env.BROWSERLESS_TOKEN
   const region = process.env.BROWSERLESS_REGION || 'production-sfo'
-  if (!token) return null
-  return `wss://${region}.browserless.io/?token=${token}`
+  if (!token) return [] as string[]
+
+  const host = `wss://${region}.browserless.io/`
+  const params = new URLSearchParams({ token })
+  const base = `${host}?${params.toString()}`
+
+  const stealthParams = new URLSearchParams({ token, stealth: 'true', blockAds: 'true' })
+  const stealth = `${host}?${stealthParams.toString()}`
+
+  const residentialEnabled = (process.env.BROWSERLESS_RESIDENTIAL || 'true').trim().toLowerCase() !== 'false'
+  if (!residentialEnabled) return [stealth, base]
+
+  const residentialParams = new URLSearchParams({
+    token,
+    stealth: 'true',
+    blockAds: 'true',
+    proxy: 'residential',
+  })
+  const residential = `${host}?${residentialParams.toString()}`
+  return [residential, stealth, base]
 }
 
 function candidateUrls(sourceUrl: string, itemId: string | null) {
@@ -245,8 +263,8 @@ async function extractPageData(page: any, sourceUrl: string) {
 }
 
 export async function scrapeListingWithBrowserless(sourceUrl: string, itemId: string | null) {
-  const wsUrl = getBrowserlessWsUrl()
-  if (!wsUrl) {
+  const wsCandidates = getBrowserlessWsCandidates()
+  if (!wsCandidates.length) {
     return { data: null as ListingData | null, error: null as string | null }
   }
 
@@ -256,45 +274,47 @@ export async function scrapeListingWithBrowserless(sourceUrl: string, itemId: st
   }
 
   let lastError: string | null = null
-  let browser: Awaited<ReturnType<typeof chromium.connectOverCDP>> | null = null
-  let context: Awaited<ReturnType<Awaited<ReturnType<typeof chromium.connectOverCDP>>['newContext']>> | null = null
-  let page: Awaited<ReturnType<Awaited<ReturnType<Awaited<ReturnType<typeof chromium.connectOverCDP>>['newContext']>>['newPage']>> | null =
-    null
+  for (const wsUrl of wsCandidates) {
+    let browser: Awaited<ReturnType<typeof chromium.connectOverCDP>> | null = null
+    let context: Awaited<ReturnType<Awaited<ReturnType<typeof chromium.connectOverCDP>>['newContext']>> | null = null
+    let page: Awaited<ReturnType<Awaited<ReturnType<Awaited<ReturnType<typeof chromium.connectOverCDP>>['newContext']>>['newPage']>> | null =
+      null
 
-  try {
-    browser = await chromium.connectOverCDP(wsUrl)
-    context = await browser.newContext({
-      viewport: { width: 1440, height: 1200 },
-      userAgent:
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36',
-      locale: 'es-AR',
-    })
-    page = await context.newPage()
+    try {
+      browser = await chromium.connectOverCDP(wsUrl)
+      context = await browser.newContext({
+        viewport: { width: 1440, height: 1200 },
+        userAgent:
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36',
+        locale: 'es-AR',
+      })
+      page = await context.newPage()
 
-    for (const url of tries) {
-      try {
-        await page.goto(url, {
-          waitUntil: 'domcontentloaded',
-          timeout: BROWSERLESS_TIMEOUT_MS,
-        })
-        await page.waitForTimeout(1200)
-        await maybeOpenFirstSearchResult(page)
+      for (const url of tries) {
+        try {
+          await page.goto(url, {
+            waitUntil: 'domcontentloaded',
+            timeout: BROWSERLESS_TIMEOUT_MS,
+          })
+          await page.waitForTimeout(1200)
+          await maybeOpenFirstSearchResult(page)
 
-        const extracted = await extractPageData(page, url)
-        if (extracted.data) return extracted
-        lastError = extracted.error || lastError
-      } catch (error) {
-        lastError = error instanceof Error ? error.message : 'Browserless error'
+          const extracted = await extractPageData(page, url)
+          if (extracted.data) return extracted
+          lastError = extracted.error || lastError
+        } catch (error) {
+          lastError = error instanceof Error ? error.message : 'Browserless error'
+        }
       }
-    }
-  } catch (error) {
-    lastError = error instanceof Error ? error.message : 'Browserless error'
-  } finally {
-    if (context) {
-      await context.close().catch(() => {})
-    }
-    if (browser) {
-      await browser.close().catch(() => {})
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : 'Browserless error'
+    } finally {
+      if (context) {
+        await context.close().catch(() => {})
+      }
+      if (browser) {
+        await browser.close().catch(() => {})
+      }
     }
   }
 
