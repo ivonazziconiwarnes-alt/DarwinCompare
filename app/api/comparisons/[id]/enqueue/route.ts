@@ -105,7 +105,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const { error: queueError } = await supabase
       .from('comparisons')
       .update({
-        sync_status: 'running',
+        sync_status: existingRun?.status === 'running' ? 'running' : 'pending',
         sync_error: null,
         updated_at: queuedAt,
       })
