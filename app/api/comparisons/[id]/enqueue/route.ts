@@ -1,11 +1,10 @@
-import { after, NextResponse } from 'next/server'
+import { NextResponse } from 'next/server'
 import { authenticatedUsername, isAuthenticatedRequest } from '@/lib/auth'
 import { readComparisonWithCompetitors } from '@/lib/comparison-store'
-import { executeComparisonRefresh } from '@/lib/comparison-runner'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 
 export const runtime = 'nodejs'
-export const maxDuration = 300
+export const maxDuration = 60
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   if (!isAuthenticatedRequest(request)) {
@@ -17,6 +16,33 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const supabase = getSupabaseAdmin()
     const requestedBy = authenticatedUsername(request)
     const queuedAt = new Date().toISOString()
+
+    const { data: existingRun, error: existingRunError } = await supabase
+      .from('comparison_runs')
+      .select('id, status')
+      .eq('comparison_id', id)
+      .in('status', ['pending', 'running'])
+      .order('requested_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    if (existingRunError) throw existingRunError
+
+    if (!existingRun) {
+      const snapshot = await readComparisonWithCompetitors(supabase, id)
+      const { error: insertRunError } = await supabase
+        .from('comparison_runs')
+        .insert({
+          comparison_id: id,
+          status: 'pending',
+          trigger_source: 'web',
+          requested_by: requestedBy,
+          requested_at: queuedAt,
+          comparison_snapshot: snapshot,
+        })
+
+      if (insertRunError) throw insertRunError
+    }
 
     const { error: queueError } = await supabase
       .from('comparisons')
@@ -31,25 +57,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
     const queuedItem = await readComparisonWithCompetitors(supabase, id)
 
-    after(async () => {
-      try {
-        await executeComparisonRefresh(supabase, id, requestedBy)
-      } catch (error) {
-        const failedAt = new Date().toISOString()
-        await supabase
-          .from('comparisons')
-          .update({
-            sync_status: 'error',
-            sync_error: error instanceof Error ? error.message : 'No se pudo actualizar la comparacion.',
-            updated_at: failedAt,
-          })
-          .eq('id', id)
-      }
-    })
-
     return NextResponse.json({
       item: queuedItem,
-      run: null,
+      run: existingRun || null,
       result: queuedItem.lastResult,
       status: 'queued',
     })

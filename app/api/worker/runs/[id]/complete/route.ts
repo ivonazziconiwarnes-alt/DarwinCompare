@@ -72,13 +72,34 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
     if (updateRunError) throw updateRunError
 
-    const comparisonUpdate = {
-      last_result: result,
-      sync_status: status,
-      last_synced_at: now,
-      sync_error: body.error || null,
-      updated_at: now,
-    }
+    const { data: comparisonRow, error: comparisonReadError } = await supabase
+      .from('comparisons')
+      .select('id, last_result')
+      .eq('id', (run as ComparisonRunRecord).comparison_id)
+      .single()
+
+    if (comparisonReadError) throw comparisonReadError
+
+    const previousResult = comparisonRow?.last_result as CompareResponse | null
+    const preservePreviousResult =
+      status === 'error' &&
+      Array.isArray(previousResult?.rows) &&
+      previousResult.rows.length > 0 &&
+      (!result || !Array.isArray(result.rows) || result.rows.length === 0)
+
+    const comparisonUpdate = preservePreviousResult
+      ? {
+          sync_status: status,
+          sync_error: body.error || null,
+          updated_at: now,
+        }
+      : {
+          last_result: result,
+          sync_status: status,
+          last_synced_at: now,
+          sync_error: body.error || null,
+          updated_at: now,
+        }
 
     const { error: comparisonError } = await supabase
       .from('comparisons')

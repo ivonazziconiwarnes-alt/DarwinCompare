@@ -5,7 +5,9 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "collector": "tsx scripts/collector.ts",
+    "collector:once": "tsx scripts/collector.ts --once"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",
@@ -21,6 +23,7 @@
     "@types/node": "^24.0.0",
     "@types/react": "^19.1.2",
     "@types/react-dom": "^19.1.2",
+    "tsx": "^4.20.6",
     "typescript": "^5.8.3"
   }
 }

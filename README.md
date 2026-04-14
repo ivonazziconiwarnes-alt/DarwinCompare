@@ -14,6 +14,7 @@ La app web hace todo desde Next.js:
 - guardado del ultimo resultado
 - historial de corridas cuando la tabla existe
 - exportacion a Excel
+- collector externo opcional para sacar la corrida pesada fuera de Vercel
 
 ## Flujo de uso
 
@@ -21,10 +22,11 @@ La app web hace todo desde Next.js:
 2. Creas o editas una comparacion.
 3. Guardas si hiciste cambios.
 4. Tocas `Actualizar ahora`.
-5. La API ejecuta la comparacion en ese mismo momento.
-6. El resultado vuelve a Supabase y aparece en pantalla.
+5. La web encola la corrida y la deja en estado `running`.
+6. El collector reclama el job pendiente, ejecuta la comparacion y publica el resultado.
+7. La pantalla refresca sola y muestra el resultado final.
 
-No hace falta un worker Python ni una app local prendida.
+La web puede funcionar sola, pero para evitar timeouts y acercarse a 0 filas sin actualizar conviene usar el collector.
 
 ## Variables de entorno
 
@@ -41,6 +43,12 @@ APP_SESSION_SECRET=TU_SECRETO_DE_SESSION
 # Opcional pero recomendado
 BROWSERLESS_TOKEN=TU_BROWSERLESS_TOKEN
 BROWSERLESS_REGION=production-sfo
+
+# Requerido para el collector externo
+APP_BASE_URL=https://darwin-compare.vercel.app
+WORKER_SYNC_TOKEN=UN_TOKEN_LARGO_Y_PRIVADO
+WORKER_ID=collector-windows
+WORKER_POLL_INTERVAL_MS=5000
 ```
 
 Tambien puedes usar `SUPABASE_SERVICE_ROLE_KEY` en lugar de `SUPABASE_SECRET_KEY`.
@@ -60,6 +68,35 @@ Simplemente no mostrara historial hasta que apliques ese SQL.
 ```bash
 npm run dev
 ```
+
+## Collector externo
+
+1. Configura en Vercel y en la maquina del collector el mismo `WORKER_SYNC_TOKEN`.
+2. En la maquina donde correra el collector deja seteados:
+
+- `APP_BASE_URL`
+- `WORKER_SYNC_TOKEN`
+- `BROWSERLESS_TOKEN` si usaras Browserless
+- `MELI_CLIENT_ID`, `MELI_CLIENT_SECRET` y `MELI_REFRESH_TOKEN` si usaras API autenticada
+
+3. En la maquina donde correra el collector:
+
+```bash
+npm install
+npm run collector
+```
+
+Si quieres probar una sola corrida:
+
+```bash
+npm run collector:once
+```
+
+El collector:
+
+- reclama jobs desde `/api/worker/runs/claim`
+- ejecuta la comparacion fuera de Vercel
+- publica el resultado en `/api/worker/runs/{id}/complete`
 
 ## Build
 
