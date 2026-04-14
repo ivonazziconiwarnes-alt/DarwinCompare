@@ -1,5 +1,6 @@
 import { load } from 'cheerio'
 import { scrapeListingWithBrowserless } from '@/lib/browserless-listing'
+import { getMeliAccessToken, hasMeliOAuthConfig } from '@/lib/meli-auth'
 import type { CompareResponse, CompareRow, ManualOverride, SavedComparison } from '@/lib/types'
 
 const API_BASE = 'https://api.mercadolibre.com'
@@ -224,21 +225,24 @@ async function parseJsonResponse(response: Response) {
   }
 }
 
-async function apiFetch(path: string, init?: RequestInit) {
+async function apiFetch(path: string, init?: RequestInit, accessToken?: string | null) {
+  const headers = new Headers(init?.headers || {})
+  headers.set('Accept', 'application/json')
+  headers.set('User-Agent', 'ComparadorML/Web')
+  if (accessToken) {
+    headers.set('Authorization', `Bearer ${accessToken}`)
+  }
+
   return fetch(`${API_BASE}${path}`, {
     ...init,
     cache: 'no-store',
     signal: init?.signal || AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    headers: {
-      Accept: 'application/json',
-      'User-Agent': 'ComparadorML/Web',
-      ...(init?.headers || {}),
-    },
+    headers,
   })
 }
 
-async function fetchItemPayload(itemId: string) {
-  const itemResponse = await apiFetch(`/items/${itemId}`)
+async function fetchItemPayload(itemId: string, accessToken?: string | null) {
+  const itemResponse = await apiFetch(`/items/${itemId}`, undefined, accessToken)
   if (itemResponse.ok) {
     const payload = await parseJsonResponse(itemResponse)
     if (isRecord(payload)) return payload
@@ -248,6 +252,8 @@ async function fetchItemPayload(itemId: string) {
     `/items?ids=${encodeURIComponent(itemId)}&attributes=${encodeURIComponent(
       'id,title,price,currency_id,thumbnail,permalink,status,original_price',
     )}`,
+    undefined,
+    accessToken,
   )
 
   if (!multigetResponse.ok) return null
@@ -258,20 +264,29 @@ async function fetchItemPayload(itemId: string) {
   return entry.body
 }
 
-async function fetchBestApiPrice(itemId: string, fallbackCurrency: string | null) {
-  const salePriceResponse = await apiFetch(`/items/${itemId}/sale_price?context=channel_marketplace`)
+async function fetchBestApiPrice(
+  itemId: string,
+  fallbackCurrency: string | null,
+  accessToken: string | null,
+  sourcePrefix: string,
+) {
+  const salePriceResponse = await apiFetch(
+    `/items/${itemId}/sale_price?context=channel_marketplace`,
+    undefined,
+    accessToken,
+  )
   if (salePriceResponse.ok) {
     const payload = await parseJsonResponse(salePriceResponse)
     if (isRecord(payload) && payload.amount !== null && typeof payload.amount !== 'undefined') {
       return {
         amount: parseAmount(payload.amount),
         currency: asString(payload.currency_id) || fallbackCurrency,
-        sourceKind: 'API sale_price',
+        sourceKind: `${sourcePrefix} sale_price`,
       }
     }
   }
 
-  const pricesResponse = await apiFetch(`/items/${itemId}/prices`)
+  const pricesResponse = await apiFetch(`/items/${itemId}/prices`, undefined, accessToken)
   if (pricesResponse.ok) {
     const payload = await parseJsonResponse(pricesResponse)
     if (isRecord(payload) && Array.isArray(payload.prices)) {
@@ -280,7 +295,7 @@ async function fetchBestApiPrice(itemId: string, fallbackCurrency: string | null
         return {
           amount: parseAmount(first.amount),
           currency: asString(first.currency_id) || fallbackCurrency,
-          sourceKind: 'API prices',
+          sourceKind: `${sourcePrefix} prices`,
         }
       }
     }
@@ -294,38 +309,59 @@ async function fetchBestApiPrice(itemId: string, fallbackCurrency: string | null
 }
 
 async function fetchApiListing(itemId: string, sourceUrl = ''): Promise<{ data: ListingData | null; error: string | null }> {
+  const attempts: Array<{ token: string | null; sourcePrefix: string }> = [{ token: null, sourcePrefix: 'API' }]
+
+  if (hasMeliOAuthConfig()) {
+    const accessToken = await getMeliAccessToken()
+    if (accessToken) {
+      attempts.push({ token: accessToken, sourcePrefix: 'API auth' })
+    }
+  }
+
+  const errors: string[] = []
+
   try {
-    const payload = await fetchItemPayload(itemId)
-    if (!payload) {
-      return { data: null, error: `API sin datos (${itemId})` }
+    for (const attempt of attempts) {
+      const payload = await fetchItemPayload(itemId, attempt.token)
+      if (!payload) {
+        errors.push(`${attempt.sourcePrefix} sin datos (${itemId})`)
+        continue
+      }
+
+      const fallbackCurrency = asString(payload.currency_id)
+      const bestPrice = await fetchBestApiPrice(itemId, fallbackCurrency, attempt.token, attempt.sourcePrefix)
+      const directPrice = parseAmount(payload.price)
+      const price = bestPrice.amount ?? directPrice
+      const currency = bestPrice.currency ?? fallbackCurrency
+
+      if (!asString(payload.title) || price === null) {
+        errors.push(`${attempt.sourcePrefix} incompleta (${itemId})`)
+        continue
+      }
+
+      return {
+        data: {
+          itemId,
+          title: asString(payload.title),
+          permalink: asString(payload.permalink) || sourceUrl || buildPublicUrl(itemId),
+          price,
+          currency,
+          imageUrl: normalizeImage(asString(payload.thumbnail)),
+          sourceKind:
+            bestPrice.sourceKind ||
+            (directPrice !== null ? `${attempt.sourcePrefix} item` : attempt.sourcePrefix),
+        },
+        error: null,
+      }
     }
 
-    const fallbackCurrency = asString(payload.currency_id)
-    const bestPrice = await fetchBestApiPrice(itemId, fallbackCurrency)
-    const directPrice = parseAmount(payload.price)
-    const price = bestPrice.amount ?? directPrice
-    const currency = bestPrice.currency ?? fallbackCurrency
-
-    if (!asString(payload.title) || price === null) {
-      return { data: null, error: `API incompleta (${itemId})` }
-    }
-
-    return {
-      data: {
-        itemId,
-        title: asString(payload.title),
-        permalink: asString(payload.permalink) || sourceUrl || buildPublicUrl(itemId),
-        price,
-        currency,
-        imageUrl: normalizeImage(asString(payload.thumbnail)),
-        sourceKind: bestPrice.sourceKind || (directPrice !== null ? 'API item' : 'API'),
-      },
-      error: null,
-    }
+    return { data: null, error: errors.join(' | ') || `API sin datos (${itemId})` }
   } catch (error) {
     return {
       data: null,
-      error: error instanceof Error ? error.message : `API error (${itemId})`,
+      error: [...errors, error instanceof Error ? error.message : `API error (${itemId})`]
+        .filter(Boolean)
+        .join(' | '),
     }
   }
 }
