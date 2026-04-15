@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { isWorkerRequest, workerRequestId } from '@/lib/auth'
 import { normalizeCompareRow } from '@/lib/comparison-store'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
-import type { CompareResponse, ComparisonRunRecord } from '@/lib/types'
+import type { CompareHistoryPoint, CompareResponse, ComparisonRunRecord } from '@/lib/types'
 
 type CompletePayload = {
   status?: 'ok' | 'error'
@@ -29,6 +29,71 @@ function isMissingColumnError(error: unknown) {
     (text.includes('column') && text.includes('does not exist')) ||
     (text.includes('could not find the') && text.includes('column'))
   )
+}
+
+function normalizeHistoryPoint(value: unknown): CompareHistoryPoint | null {
+  if (!value || typeof value !== 'object') return null
+  const record = value as Record<string, unknown>
+  const capturedAt = typeof record.capturedAt === 'string' ? record.capturedAt : null
+  const rawRows = Array.isArray(record.rows) ? record.rows : []
+
+  if (!capturedAt || !rawRows.length) return null
+
+  return {
+    runId: typeof record.runId === 'string' ? record.runId : null,
+    capturedAt,
+    rows: rawRows
+      .map((row: any) => normalizeCompareRow(row))
+      .map((row) => ({
+        role: row.role,
+        name: row.name,
+        url: row.url,
+        itemId: row.itemId,
+        price: row.price,
+        currency: row.currency,
+        source: row.source,
+        sourceKind: row.sourceKind ?? null,
+      })),
+  }
+}
+
+function historyPointFromRows(runId: string | null, capturedAt: string, rows: ReturnType<typeof normalizeCompareRow>[]) {
+  const historyRows = rows
+    .filter((row) => row.price !== null && typeof row.price !== 'undefined')
+    .map((row) => ({
+      role: row.role,
+      name: row.name,
+      url: row.url,
+      itemId: row.itemId,
+      price: row.price,
+      currency: row.currency,
+      source: row.source,
+      sourceKind: row.sourceKind ?? null,
+    }))
+
+  if (!historyRows.length) return null
+
+  return {
+    runId,
+    capturedAt,
+    rows: historyRows,
+  } satisfies CompareHistoryPoint
+}
+
+function mergeHistoryPoints(points: Array<CompareHistoryPoint | null | undefined>) {
+  const byKey = new Map<string, CompareHistoryPoint>()
+
+  points.forEach((point) => {
+    if (!point) return
+    const normalized = normalizeHistoryPoint(point)
+    if (!normalized) return
+    const key = normalized.runId || normalized.capturedAt
+    byKey.set(key, normalized)
+  })
+
+  return Array.from(byKey.values())
+    .sort((a, b) => new Date(a.capturedAt).getTime() - new Date(b.capturedAt).getTime())
+    .slice(-24)
 }
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -147,13 +212,40 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
     const { data: comparisonRow, error: comparisonReadError } = await supabase
       .from('comparisons')
-      .select('id, last_result')
+      .select('id, last_result, last_synced_at')
       .eq('id', (run as ComparisonRunRecord).comparison_id)
       .single()
 
     if (comparisonReadError) throw comparisonReadError
 
     const previousResult = comparisonRow?.last_result as CompareResponse | null
+    const previousHistory = Array.isArray(previousResult?.history)
+      ? previousResult.history
+          .map(normalizeHistoryPoint)
+          .filter((point: CompareHistoryPoint | null): point is CompareHistoryPoint => Boolean(point))
+      : []
+    const previousSnapshot =
+      previousHistory.length === 0 && Array.isArray(previousResult?.rows) && previousResult.rows.length > 0
+        ? historyPointFromRows(
+            null,
+            comparisonRow?.last_synced_at || now,
+            previousResult.rows.map(normalizeCompareRow),
+          )
+        : null
+    const currentSnapshot = historyPointFromRows(
+      (run as ComparisonRunRecord).id,
+      (run as ComparisonRunRecord).started_at || (run as ComparisonRunRecord).requested_at || now,
+      normalizedRows,
+    )
+    const nextHistory = mergeHistoryPoints([...previousHistory, previousSnapshot, currentSnapshot])
+    const nextResult =
+      result && normalizedRows.length
+        ? {
+            ...result,
+            rows: normalizedRows,
+            history: nextHistory,
+          }
+        : result
     const preservePreviousResult =
       status === 'error' &&
       Array.isArray(previousResult?.rows) &&
@@ -167,7 +259,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
           updated_at: now,
         }
       : {
-          last_result: result,
+          last_result: nextResult,
           sync_status: status,
           last_synced_at: now,
           sync_error: body.error || null,

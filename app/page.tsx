@@ -16,10 +16,18 @@ import {
   RefreshCw,
   Save,
   Tag,
+  TrendingUp,
   Trash2,
   X,
 } from 'lucide-react'
-import type { ComparisonRun, CompetitorInput, ManualOverride, SavedComparison } from '@/lib/types'
+import type {
+  CompareHistoryPoint,
+  CompareRow,
+  ComparisonRun,
+  CompetitorInput,
+  ManualOverride,
+  SavedComparison,
+} from '@/lib/types'
 
 function uid() {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID()
@@ -121,6 +129,19 @@ function prettyDate(value: string) {
   }
 }
 
+function shortDateTime(value: string) {
+  try {
+    return new Intl.DateTimeFormat('es-AR', {
+      day: '2-digit',
+      month: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(new Date(value))
+  } catch {
+    return value
+  }
+}
+
 function syncLabel(status: 'pending' | 'running' | 'ok' | 'error') {
   if (status === 'ok') return 'Actualizada'
   if (status === 'running') return 'Ejecutando'
@@ -135,11 +156,188 @@ function syncClass(status: 'pending' | 'running' | 'ok' | 'error') {
   return 'sync-pending'
 }
 
-function runStatusCopy(run: ComparisonRun) {
-  if (run.status === 'ok') return 'Completada'
-  if (run.status === 'running') return 'En ejecucion'
-  if (run.status === 'error') return 'Fallida'
-  return 'Pendiente'
+type PriceHistorySnapshot = {
+  key: string
+  capturedAt: string
+  label: string
+  rows: CompareHistoryPoint['rows']
+}
+
+type PriceHistorySeries = {
+  key: string
+  label: string
+  role: CompareRow['role']
+  currency: string | null
+  color: string
+  values: Array<number | null>
+  latestPrice: number | null
+}
+
+type PriceHistoryChartData = {
+  snapshots: PriceHistorySnapshot[]
+  series: PriceHistorySeries[]
+  minPrice: number
+  maxPrice: number
+  ticks: number[]
+}
+
+const HISTORY_COLORS = ['#2f6df6', '#14c8b8', '#ff9d00', '#ff5d7a', '#7a5cff', '#10b981', '#f97316']
+const MINE_HISTORY_COLOR = '#c28a11'
+
+function rowToHistoryRow(row: CompareRow) {
+  return {
+    role: row.role,
+    name: row.name,
+    url: row.url,
+    itemId: row.itemId,
+    price: row.price,
+    currency: row.currency,
+    source: row.source,
+    sourceKind: row.sourceKind ?? null,
+  }
+}
+
+function normalizeHistorySnapshots(selected: SavedComparison | null, runs: ComparisonRun[]): PriceHistorySnapshot[] {
+  if (!selected) return []
+
+  const byKey = new Map<string, PriceHistorySnapshot>()
+  const history = Array.isArray(selected.lastResult?.history) ? selected.lastResult.history : []
+
+  history.forEach((point, index) => {
+    if (!point?.capturedAt || !Array.isArray(point.rows) || !point.rows.length) return
+    const key = point.runId || `history-${point.capturedAt}-${index}`
+    byKey.set(key, {
+      key,
+      capturedAt: point.capturedAt,
+      label: shortDateTime(point.capturedAt),
+      rows: point.rows,
+    })
+  })
+
+  runs.forEach((run) => {
+    if (!Array.isArray(run.rows) || !run.rows.length) return
+    const capturedAt = run.finishedAt || run.startedAt || run.requestedAt
+    byKey.set(run.id, {
+      key: run.id,
+      capturedAt,
+      label: shortDateTime(capturedAt),
+      rows: run.rows.map(rowToHistoryRow),
+    })
+  })
+
+  const currentRows = selected.lastResult?.rows || []
+  if (currentRows.length) {
+    const capturedAt = selected.lastSyncedAt || selected.updatedAt || selected.createdAt
+    const alreadyIncluded = Array.from(byKey.values()).some((snapshot) => snapshot.capturedAt === capturedAt)
+
+    if (!alreadyIncluded) {
+      byKey.set(`current-${capturedAt}`, {
+        key: `current-${capturedAt}`,
+        capturedAt,
+        label: shortDateTime(capturedAt),
+        rows: currentRows.map(rowToHistoryRow),
+      })
+    }
+  }
+
+  return Array.from(byKey.values()).sort(
+    (a, b) => new Date(a.capturedAt).getTime() - new Date(b.capturedAt).getTime(),
+  )
+}
+
+function buildPriceHistoryChartData(
+  selected: SavedComparison | null,
+  runs: ComparisonRun[],
+): PriceHistoryChartData | null {
+  const snapshots = normalizeHistorySnapshots(selected, runs)
+  if (!snapshots.length) return null
+
+  const seriesMap = new Map<
+    string,
+    Omit<PriceHistorySeries, 'color'> & { colorIndex?: number }
+  >()
+  let competitorColorIndex = 0
+
+  snapshots.forEach((snapshot, snapshotIndex) => {
+    snapshot.rows.forEach((row) => {
+      const key = `${row.role}::${row.itemId || row.url || row.name}`
+      const price = typeof row.price === 'number' ? row.price : null
+
+      if (!seriesMap.has(key)) {
+        seriesMap.set(key, {
+          key,
+          label: row.name || (row.role === 'mine' ? 'Mi publicación' : 'Competidor'),
+          role: row.role,
+          currency: row.currency ?? 'ARS',
+          values: Array(snapshots.length).fill(null),
+          latestPrice: null,
+          colorIndex: row.role === 'mine' ? -1 : competitorColorIndex++,
+        })
+      }
+
+      const series = seriesMap.get(key)!
+      series.values[snapshotIndex] = price
+      series.latestPrice = price ?? series.latestPrice
+      if (!series.currency && row.currency) series.currency = row.currency
+      if (row.name) series.label = row.name
+    })
+  })
+
+  const series = Array.from(seriesMap.values())
+    .filter((entry) => entry.values.some((value) => value !== null))
+    .map((entry) => ({
+      ...entry,
+      color:
+        entry.role === 'mine'
+          ? MINE_HISTORY_COLOR
+          : HISTORY_COLORS[(entry.colorIndex || 0) % HISTORY_COLORS.length],
+    }))
+    .sort((a, b) => {
+      if (a.role !== b.role) return a.role === 'mine' ? -1 : 1
+      return a.label.localeCompare(b.label, 'es')
+    })
+
+  const allValues = series.flatMap((entry) => entry.values).filter((value): value is number => value !== null)
+  if (!allValues.length) return null
+
+  const rawMin = Math.min(...allValues)
+  const rawMax = Math.max(...allValues)
+  const padding = Math.max((rawMax - rawMin) * 0.12, rawMax * 0.04, 1)
+  const minPrice = Math.max(0, rawMin - padding)
+  const maxPrice = rawMax + padding
+  const tickCount: number = 4
+  const ticks = Array.from({ length: tickCount }, (_, index) => {
+    if (tickCount === 1) return maxPrice
+    const ratio = index / (tickCount - 1)
+    return maxPrice - (maxPrice - minPrice) * ratio
+  })
+
+  return { snapshots, series, minPrice, maxPrice, ticks }
+}
+
+function axisMoney(value: number, currency: string | null | undefined) {
+  return new Intl.NumberFormat('es-AR', {
+    style: 'currency',
+    currency: currency || 'ARS',
+    maximumFractionDigits: 0,
+  }).format(value)
+}
+
+function svgLinePath(values: Array<number | null>, xFor: (index: number) => number, yFor: (value: number) => number) {
+  let path = ''
+  let open = false
+
+  values.forEach((value, index) => {
+    if (value === null) {
+      open = false
+      return
+    }
+
+    path += `${open ? 'L' : 'M'}${xFor(index)} ${yFor(value)} `
+    open = true
+  })
+
+  return path.trim()
 }
 
 async function readApiPayload(res: Response) {
@@ -178,6 +376,7 @@ export default function HomePage() {
   const [loginPassword, setLoginPassword] = useState('')
 
   const selected = useMemo(() => items.find((item) => item.id === selectedId) || null, [items, selectedId])
+  const historyChart = useMemo(() => buildPriceHistoryChartData(selected, runs), [selected, runs])
 
   async function checkSession() {
     setCheckingSession(true)
@@ -246,7 +445,7 @@ export default function HomePage() {
     if (!silent) setLoadingRuns(true)
 
     try {
-      const res = await fetch(`/api/comparisons/${comparisonId}/runs?limit=8`, { cache: 'no-store' })
+      const res = await fetch(`/api/comparisons/${comparisonId}/runs?limit=20`, { cache: 'no-store' })
 
       if (res.status === 401) {
         setLoggedIn(false)
@@ -621,6 +820,11 @@ export default function HomePage() {
 
   const rows = selected?.lastResult?.rows || []
   const dirty = !!selected && dirtyIds.includes(selected.id)
+  const historyCurrency =
+    historyChart?.series.find((series) => series.role === 'mine')?.currency ||
+    historyChart?.series[0]?.currency ||
+    selected?.lastResult?.rows.find((row) => row.currency)?.currency ||
+    'ARS'
 
   if (checkingSession) {
     return (
@@ -993,37 +1197,127 @@ export default function HomePage() {
                 <div className="runs-panel">
                   <div className="runs-panel-head">
                     <div>
-                      <div className="eyebrow">Corridas</div>
-                      <h3>Ultimas ejecuciones</h3>
+                      <div className="eyebrow">
+                        <TrendingUp size={16} />
+                        Evolución
+                      </div>
+                      <h3>Historial de precios</h3>
+                      <p className="runs-panel-copy">
+                        Cada punto representa una lectura guardada para esta comparación.
+                      </p>
                     </div>
                     {loadingRuns ? (
                       <div className="runs-loading">
                         <Loader2 size={14} className="spin" />
-                        Cargando
+                        Cargando historial
                       </div>
                     ) : null}
                   </div>
 
-                  {runs.length ? (
-                    <div className="runs-list">
-                      {runs.map((run) => (
-                        <article key={run.id} className="run-card">
-                          <div className="run-card-top">
-                            <div className={`sync-badge ${syncClass(run.status)}`}>{runStatusCopy(run)}</div>
-                            <div className="run-card-time">{prettyDate(run.requestedAt)}</div>
+                  {historyChart ? (
+                    <div className="history-chart-shell">
+                      <div className="history-chart-card">
+                        <svg
+                          className="history-chart"
+                          viewBox="0 0 860 320"
+                          role="img"
+                          aria-label={`Gráfico del historial de precios de ${selected.name}`}
+                        >
+                          {(() => {
+                            const width = 860
+                            const height = 320
+                            const left = 72
+                            const right = 22
+                            const top = 16
+                            const bottom = 44
+                            const plotWidth = width - left - right
+                            const plotHeight = height - top - bottom
+                            const lastIndex = Math.max(historyChart.snapshots.length - 1, 1)
+                            const xFor = (index: number) => left + (plotWidth * index) / lastIndex
+                            const yFor = (value: number) =>
+                              top +
+                              ((historyChart.maxPrice - value) / (historyChart.maxPrice - historyChart.minPrice || 1)) *
+                                plotHeight
+
+                            return (
+                              <>
+                                {historyChart.ticks.map((tick) => {
+                                  const y = yFor(tick)
+                                  return (
+                                    <g key={tick}>
+                                      <line x1={left} y1={y} x2={width - right} y2={y} className="history-grid-line" />
+                                      <text x={12} y={y + 4} className="history-axis-label">
+                                        {axisMoney(tick, historyCurrency)}
+                                      </text>
+                                    </g>
+                                  )
+                                })}
+
+                                {historyChart.snapshots.map((snapshot, index) => (
+                                  <text
+                                    key={snapshot.key}
+                                    x={xFor(index)}
+                                    y={height - 14}
+                                    textAnchor={
+                                      index === 0
+                                        ? 'start'
+                                        : index === historyChart.snapshots.length - 1
+                                          ? 'end'
+                                          : 'middle'
+                                    }
+                                    className="history-axis-label x"
+                                  >
+                                    {snapshot.label}
+                                  </text>
+                                ))}
+
+                                {historyChart.series.map((series) => (
+                                  <g key={series.key}>
+                                    <path
+                                      d={svgLinePath(series.values, xFor, yFor)}
+                                      fill="none"
+                                      stroke={series.color}
+                                      strokeWidth="3.5"
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                    />
+                                    {series.values.map((value, index) =>
+                                      value === null ? null : (
+                                        <circle
+                                          key={`${series.key}-${index}`}
+                                          cx={xFor(index)}
+                                          cy={yFor(value)}
+                                          r="4.5"
+                                          fill={series.color}
+                                          className="history-point"
+                                        />
+                                      ),
+                                    )}
+                                  </g>
+                                ))}
+                              </>
+                            )
+                          })()}
+                        </svg>
+                      </div>
+
+                      <div className="history-legend">
+                        {historyChart.series.map((series) => (
+                          <div key={series.key} className={`history-legend-item ${series.role === 'mine' ? 'is-mine' : ''}`}>
+                            <span className="history-legend-swatch" style={{ backgroundColor: series.color }} />
+                            <div className="history-legend-copy">
+                              <div className="history-legend-name">{series.label}</div>
+                              <div className="history-legend-price">
+                                {series.latestPrice !== null ? money(series.latestPrice, series.currency) : '—'}
+                              </div>
+                            </div>
                           </div>
-                          <div className="run-card-meta">
-                            {run.resultSummary
-                              ? `${run.resultSummary.ok}/${run.resultSummary.total} con datos`
-                              : 'Esperando resultado'}
-                          </div>
-                          {run.error ? <div className="run-card-error">{run.error}</div> : null}
-                        </article>
-                      ))}
+                        ))}
+                      </div>
                     </div>
                   ) : (
                     <div className="empty-state runs-empty">
-                      Todavía no hay ejecuciones registradas para esta comparación.
+                      Hacé una actualización más para empezar a ver la evolución de precios.
                     </div>
                   )}
                 </div>

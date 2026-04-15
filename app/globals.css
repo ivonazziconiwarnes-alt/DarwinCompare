@@ -347,6 +347,13 @@ img {
   font-size: 1rem;
 }
 
+.runs-panel-copy {
+  margin: 8px 0 0;
+  color: var(--text-soft);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
 .runs-loading {
   display: inline-flex;
   align-items: center;
@@ -355,41 +362,89 @@ img {
   font-size: 0.85rem;
 }
 
-.runs-list {
+.history-chart-shell {
   display: grid;
+  gap: 14px;
+}
+
+.history-chart-card {
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.88);
+  padding: 10px 12px 14px;
+  overflow: hidden;
+}
+
+.history-chart {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.history-grid-line {
+  stroke: rgba(95, 113, 136, 0.18);
+  stroke-width: 1;
+}
+
+.history-axis-label {
+  fill: var(--text-soft);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.history-axis-label.x {
+  font-size: 11px;
+}
+
+.history-point {
+  stroke: rgba(255, 255, 255, 0.95);
+  stroke-width: 2;
+}
+
+.history-legend {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
   gap: 10px;
 }
 
-.run-card {
-  border: 1px solid var(--line);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.88);
-  padding: 12px 14px;
-}
-
-.run-card-top {
+.history-legend-item {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.88);
 }
 
-.run-card-time,
-.run-card-meta {
+.history-legend-item.is-mine {
+  background: linear-gradient(180deg, rgba(255, 248, 216, 0.78), rgba(255, 252, 237, 0.92));
+  border-color: var(--mine-line);
+}
+
+.history-legend-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+  box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.72);
+}
+
+.history-legend-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.history-legend-name {
+  font-size: 0.9rem;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.history-legend-price {
   color: var(--text-soft);
   font-size: 0.84rem;
-  line-height: 1.45;
-}
-
-.run-card-meta {
-  margin-top: 8px;
-}
-
-.run-card-error {
-  margin-top: 8px;
-  color: var(--bad);
-  font-size: 0.84rem;
-  line-height: 1.45;
+  font-weight: 700;
 }
 
 .runs-empty {

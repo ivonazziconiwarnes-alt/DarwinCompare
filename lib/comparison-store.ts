@@ -4,6 +4,7 @@ import type {
   ComparisonRunRecord,
   ComparisonRunRowRecord,
   CompetitorRecord,
+  CompareHistoryPoint,
   ManualOverride,
   SavedComparison,
   CompareRow,
@@ -78,7 +79,44 @@ export function normalizeCompareRow(value: any): CompareRow {
   }
 }
 
+function normalizeHistoryPoint(value: any): CompareHistoryPoint | null {
+  const capturedAt = typeof value?.capturedAt === 'string' ? value.capturedAt : null
+  const rawRows = Array.isArray(value?.rows) ? value.rows : []
+
+  if (!capturedAt || !rawRows.length) return null
+
+  return {
+    runId: typeof value?.runId === 'string' ? value.runId : null,
+    capturedAt,
+    rows: rawRows.map((row: any) => {
+      const normalized = normalizeCompareRow(row)
+      return {
+        role: normalized.role,
+        name: normalized.name,
+        url: normalized.url,
+        itemId: normalized.itemId,
+        price: normalized.price,
+        currency: normalized.currency,
+        source: normalized.source,
+        sourceKind: normalized.sourceKind ?? null,
+      }
+    }),
+  }
+}
+
 export function mapComparison(record: ComparisonRecord, competitors: CompetitorRecord[]): SavedComparison {
+  const lastResult = record.last_result
+    ? {
+        ...record.last_result,
+        rows: (record.last_result.rows || []).map(normalizeCompareRow),
+        history: Array.isArray((record.last_result as any).history)
+          ? (record.last_result as any).history
+              .map(normalizeHistoryPoint)
+              .filter((point: CompareHistoryPoint | null): point is CompareHistoryPoint => Boolean(point))
+          : [],
+      }
+    : null
+
   return {
     id: record.id,
     name: record.name,
@@ -88,12 +126,7 @@ export function mapComparison(record: ComparisonRecord, competitors: CompetitorR
     myManual: record.my_manual || emptyManual(),
     createdAt: record.created_at,
     updatedAt: record.updated_at,
-    lastResult: record.last_result
-      ? {
-          ...record.last_result,
-          rows: (record.last_result.rows || []).map(normalizeCompareRow),
-        }
-      : null,
+    lastResult,
     syncStatus: record.sync_status || 'pending',
     lastSyncedAt: record.last_synced_at || null,
     syncError: record.sync_error || null,

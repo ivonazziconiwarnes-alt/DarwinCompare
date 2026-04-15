@@ -30,6 +30,23 @@ export type CompareRow = {
   pct?: number | null
 }
 
+export type CompareHistoryRow = {
+  role: CompareRow['role']
+  name: string
+  url: string
+  itemId: string | null
+  price: number | null
+  currency: string | null
+  source: CompareRow['source']
+  sourceKind?: string | null
+}
+
+export type CompareHistoryPoint = {
+  runId: string | null
+  capturedAt: string
+  rows: CompareHistoryRow[]
+}
+
 export type CompareResponse = {
   comparisonName: string
   rows: CompareRow[]
@@ -39,6 +56,7 @@ export type CompareResponse = {
     failed: number
     minePrice: number | null
   }
+  history?: CompareHistoryPoint[]
   error?: string
 }
 
