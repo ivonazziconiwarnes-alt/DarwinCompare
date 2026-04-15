@@ -364,12 +364,14 @@ export default function HomePage() {
   const [loadingInitial, setLoadingInitial] = useState(true)
   const [saving, setSaving] = useState(false)
   const [loadingCompare, setLoadingCompare] = useState(false)
+  const [loadingAllCompare, setLoadingAllCompare] = useState(false)
   const [loadingRuns, setLoadingRuns] = useState(false)
   const [checkingSession, setCheckingSession] = useState(true)
   const [loggedIn, setLoggedIn] = useState(false)
   const [loginLoading, setLoginLoading] = useState(false)
   const [showEditor, setShowEditor] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
   const [previewImage, setPreviewImage] = useState<{ src: string; title: string } | null>(null)
   const [dirtyIds, setDirtyIds] = useState<string[]>([])
   const [loginUser, setLoginUser] = useState('')
@@ -746,6 +748,7 @@ export default function HomePage() {
 
     setLoadingCompare(true)
     setError(null)
+    setNotice(null)
 
     try {
       if (dirty) {
@@ -783,6 +786,51 @@ export default function HomePage() {
       setError(err instanceof Error ? err.message : 'No se pudo actualizar la comparacion.')
     } finally {
       setLoadingCompare(false)
+    }
+  }
+
+  async function enqueueAllRuns() {
+    setLoadingAllCompare(true)
+    setError(null)
+    setNotice(null)
+
+    try {
+      if (selected && dirty) {
+        await saveComparison()
+      }
+
+      const queueRes = await fetch('/api/comparisons/enqueue-all', {
+        method: 'POST',
+      })
+
+      if (queueRes.status === 401) {
+        setLoggedIn(false)
+        return
+      }
+
+      const queueJson = await readApiPayload(queueRes)
+      if (!queueRes.ok) throw new Error(queueJson.error || 'No se pudieron actualizar las comparaciones.')
+
+      const summary = queueJson.summary || {}
+      const queued = Number(summary.queued || 0)
+      const skipped = Number(summary.skipped || 0)
+      const failed = Number(summary.failed || 0)
+
+      if (!queued && skipped && !failed) {
+        setNotice('No se encolo ninguna comparacion porque las comparaciones disponibles estan incompletas.')
+      } else {
+        const parts = [`${queued} comparacion${queued === 1 ? '' : 'es'} en cola`]
+        if (skipped) parts.push(`${skipped} omitida${skipped === 1 ? '' : 's'} por estar incompleta${skipped === 1 ? '' : 's'}`)
+        if (failed) parts.push(`${failed} con error`)
+        setNotice(parts.join(' · '))
+      }
+
+      await loadComparisons(selected?.id)
+      if (selected?.id) await loadRuns(selected.id)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudieron actualizar las comparaciones.')
+    } finally {
+      setLoadingAllCompare(false)
     }
   }
 
@@ -996,9 +1044,27 @@ export default function HomePage() {
                     </button>
 
                     <button
+                      className="button ghost"
+                      onClick={enqueueAllRuns}
+                      disabled={loadingAllCompare || loadingCompare || !items.length}
+                    >
+                      {loadingAllCompare ? (
+                        <>
+                          <Loader2 size={16} className="spin" />
+                          Encolando todo...
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw size={16} />
+                          Actualizar todas
+                        </>
+                      )}
+                    </button>
+
+                    <button
                       className="button primary"
                       onClick={enqueueRun}
-                      disabled={loadingCompare || selected.syncStatus === 'running'}
+                      disabled={loadingCompare || loadingAllCompare || selected.syncStatus === 'running'}
                     >
                       {loadingCompare ? (
                         <>
@@ -1054,6 +1120,7 @@ export default function HomePage() {
           </section>
 
           {error ? <div className="error-box">{error}</div> : null}
+          {notice ? <div className="notice-box">{notice}</div> : null}
           {selected?.syncError ? (
             <div className={selected.syncStatus === 'ok' ? 'notice-box' : 'error-box'}>
               {selected.syncError}
