@@ -161,6 +161,7 @@ type PriceHistorySnapshot = {
   capturedAt: string
   label: string
   rows: CompareHistoryPoint['rows']
+  displayRows: CompareRow[]
 }
 
 type PriceHistorySeries = {
@@ -197,35 +198,119 @@ function rowToHistoryRow(row: CompareRow) {
   }
 }
 
+function historyRowKey(row: Pick<CompareRow, 'role' | 'itemId' | 'url' | 'name'>) {
+  return `${row.role}::${row.itemId || row.url || row.name}`
+}
+
+function historyRowToCompareRow(
+  row: CompareHistoryPoint['rows'][number],
+  reference?: CompareRow,
+): CompareRow {
+  return {
+    role: row.role,
+    name: row.name,
+    url: row.url,
+    itemId: row.itemId,
+    title: reference?.title || row.name || null,
+    price: row.price,
+    currency: row.currency,
+    imageUrl: reference?.imageUrl || null,
+    source: row.source,
+    sourceKind: row.sourceKind ?? reference?.sourceKind ?? null,
+    error: undefined,
+    diff: null,
+    pct: null,
+  }
+}
+
+function withComputedDiffs(rows: CompareRow[]) {
+  const mineRow = rows.find((row) => row.role === 'mine')
+  const minePrice = mineRow?.price ?? null
+
+  return rows.map((row) => {
+    if (row.role === 'mine') {
+      return {
+        ...row,
+        diff: typeof row.price === 'number' ? 0 : null,
+        pct: typeof row.price === 'number' ? 0 : null,
+      }
+    }
+
+    if (minePrice === null || row.price === null) {
+      return {
+        ...row,
+        diff: null,
+        pct: null,
+      }
+    }
+
+    const diff = row.price - minePrice
+    return {
+      ...row,
+      diff,
+      pct: minePrice ? (diff / minePrice) * 100 : null,
+    }
+  })
+}
+
+function summarizeRows(rows: CompareRow[]) {
+  const mineRow = rows.find((row) => row.role === 'mine')
+  const ok = rows.filter((row) => row.price !== null).length
+  return {
+    total: rows.length,
+    ok,
+    failed: rows.length - ok,
+    minePrice: mineRow?.price ?? null,
+  }
+}
+
 function normalizeHistorySnapshots(selected: SavedComparison | null, runs: ComparisonRun[]): PriceHistorySnapshot[] {
   if (!selected) return []
 
   const byKey = new Map<string, PriceHistorySnapshot>()
   const history = Array.isArray(selected.lastResult?.history) ? selected.lastResult.history : []
+  const referenceRows = new Map<string, CompareRow>()
+  const currentRows = selected.lastResult?.rows || []
+
+  currentRows.forEach((row) => {
+    referenceRows.set(historyRowKey(row), row)
+  })
+
+  runs.forEach((run) => {
+    run.rows.forEach((row) => {
+      const key = historyRowKey(row)
+      if (!referenceRows.has(key)) referenceRows.set(key, row)
+    })
+  })
 
   history.forEach((point, index) => {
     if (!point?.capturedAt || !Array.isArray(point.rows) || !point.rows.length) return
     const key = point.runId || `history-${point.capturedAt}-${index}`
+    const displayRows = withComputedDiffs(
+      point.rows.map((row) => historyRowToCompareRow(row, referenceRows.get(historyRowKey(row)))),
+    )
     byKey.set(key, {
       key,
       capturedAt: point.capturedAt,
       label: shortDateTime(point.capturedAt),
       rows: point.rows,
+      displayRows,
     })
   })
 
   runs.forEach((run) => {
     if (!Array.isArray(run.rows) || !run.rows.length) return
     const capturedAt = run.finishedAt || run.startedAt || run.requestedAt
+    const displayRows = withComputedDiffs(run.rows)
     byKey.set(run.id, {
       key: run.id,
       capturedAt,
       label: shortDateTime(capturedAt),
       rows: run.rows.map(rowToHistoryRow),
+      displayRows,
     })
   })
 
-  const currentRows = selected.lastResult?.rows || []
   if (currentRows.length) {
     const capturedAt = selected.lastSyncedAt || selected.updatedAt || selected.createdAt
     const alreadyIncluded = Array.from(byKey.values()).some((snapshot) => snapshot.capturedAt === capturedAt)
@@ -236,6 +321,7 @@ function normalizeHistorySnapshots(selected: SavedComparison | null, runs: Compa
         capturedAt,
         label: shortDateTime(capturedAt),
         rows: currentRows.map(rowToHistoryRow),
+        displayRows: withComputedDiffs(currentRows),
       })
     }
   }
@@ -260,7 +346,7 @@ function buildPriceHistoryChartData(
 
   snapshots.forEach((snapshot, snapshotIndex) => {
     snapshot.rows.forEach((row) => {
-      const key = `${row.role}::${row.itemId || row.url || row.name}`
+      const key = historyRowKey(row)
       const price = typeof row.price === 'number' ? row.price : null
 
       if (!seriesMap.has(key)) {
@@ -305,14 +391,41 @@ function buildPriceHistoryChartData(
   const padding = Math.max((rawMax - rawMin) * 0.12, rawMax * 0.04, 1)
   const minPrice = Math.max(0, rawMin - padding)
   const maxPrice = rawMax + padding
-  const tickCount: number = 4
+  const tickCount = 4
   const ticks = Array.from({ length: tickCount }, (_, index) => {
-    if (tickCount === 1) return maxPrice
     const ratio = index / (tickCount - 1)
     return maxPrice - (maxPrice - minPrice) * ratio
   })
 
   return { snapshots, series, minPrice, maxPrice, ticks }
+}
+
+function filterPriceHistoryChartData(chart: PriceHistoryChartData | null, visibleKeys: string[]) {
+  if (!chart) return null
+
+  const keySet = new Set(visibleKeys)
+  const series = chart.series.filter((entry) => keySet.has(entry.key))
+  if (!series.length) {
+    return { ...chart, series: [] as PriceHistorySeries[] }
+  }
+
+  const allValues = series.flatMap((entry) => entry.values).filter((value): value is number => value !== null)
+  if (!allValues.length) {
+    return { ...chart, series }
+  }
+
+  const rawMin = Math.min(...allValues)
+  const rawMax = Math.max(...allValues)
+  const padding = Math.max((rawMax - rawMin) * 0.12, rawMax * 0.04, 1)
+  const minPrice = Math.max(0, rawMin - padding)
+  const maxPrice = rawMax + padding
+  const tickCount = 4
+  const ticks = Array.from({ length: tickCount }, (_, index) => {
+    const ratio = index / (tickCount - 1)
+    return maxPrice - (maxPrice - minPrice) * ratio
+  })
+
+  return { ...chart, series, minPrice, maxPrice, ticks }
 }
 
 function axisMoney(value: number, currency: string | null | undefined) {
@@ -372,6 +485,8 @@ export default function HomePage() {
   const [showEditor, setShowEditor] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [visibleCompetitorSeries, setVisibleCompetitorSeries] = useState<string[]>([])
+  const [selectedSnapshotKey, setSelectedSnapshotKey] = useState<string | null>(null)
   const [previewImage, setPreviewImage] = useState<{ src: string; title: string } | null>(null)
   const [dirtyIds, setDirtyIds] = useState<string[]>([])
   const [loginUser, setLoginUser] = useState('')
@@ -379,6 +494,60 @@ export default function HomePage() {
 
   const selected = useMemo(() => items.find((item) => item.id === selectedId) || null, [items, selectedId])
   const historyChart = useMemo(() => buildPriceHistoryChartData(selected, runs), [selected, runs])
+  const competitorSeries = useMemo(
+    () => historyChart?.series.filter((series) => series.role === 'competitor') || [],
+    [historyChart],
+  )
+  const visibleHistoryKeys = useMemo(() => {
+    const mineKeys = historyChart?.series.filter((series) => series.role === 'mine').map((series) => series.key) || []
+    return [...mineKeys, ...visibleCompetitorSeries]
+  }, [historyChart, visibleCompetitorSeries])
+  const visibleHistoryChart = useMemo(
+    () => filterPriceHistoryChartData(historyChart, visibleHistoryKeys),
+    [historyChart, visibleHistoryKeys],
+  )
+
+  const selectedSnapshot = useMemo(() => {
+    if (!historyChart?.snapshots.length) return null
+    return (
+      historyChart.snapshots.find((snapshot) => snapshot.key === selectedSnapshotKey) ||
+      historyChart.snapshots[historyChart.snapshots.length - 1]
+    )
+  }, [historyChart, selectedSnapshotKey])
+
+  const displayedRows = useMemo(() => {
+    const baseRows = selectedSnapshot?.displayRows || selected?.lastResult?.rows || []
+    if (!baseRows.length) return []
+
+    const visibleKeySet = new Set(visibleHistoryKeys)
+    return withComputedDiffs(
+      baseRows.filter((row) => row.role === 'mine' || visibleKeySet.has(historyRowKey(row))),
+    )
+  }, [selectedSnapshot, selected, visibleHistoryKeys])
+
+  const displayedSummary = useMemo(
+    () => summarizeRows(displayedRows.length ? displayedRows : selected?.lastResult?.rows || []),
+    [displayedRows, selected],
+  )
+
+  useEffect(() => {
+    const availableKeys = competitorSeries.map((series) => series.key)
+    setVisibleCompetitorSeries((current) => {
+      const kept = current.filter((key) => availableKeys.includes(key))
+      if (!kept.length && availableKeys.length) return availableKeys
+      if (kept.length === current.length) return current
+      return kept
+    })
+  }, [selectedId, competitorSeries])
+
+  useEffect(() => {
+    const snapshotKeys = historyChart?.snapshots.map((snapshot) => snapshot.key) || []
+    setSelectedSnapshotKey((current) => {
+      if (!snapshotKeys.length) return null
+      if (current && snapshotKeys.includes(current)) return current
+      return snapshotKeys[snapshotKeys.length - 1]
+    })
+  }, [selectedId, historyChart])
 
   async function checkSession() {
     setCheckingSession(true)
@@ -866,12 +1035,12 @@ export default function HomePage() {
     }
   }
 
-  const rows = selected?.lastResult?.rows || []
+  const rows = displayedRows
   const dirty = !!selected && dirtyIds.includes(selected.id)
   const historyCurrency =
-    historyChart?.series.find((series) => series.role === 'mine')?.currency ||
-    historyChart?.series[0]?.currency ||
-    selected?.lastResult?.rows.find((row) => row.currency)?.currency ||
+    visibleHistoryChart?.series.find((series) => series.role === 'mine')?.currency ||
+    visibleHistoryChart?.series[0]?.currency ||
+    rows.find((row) => row.currency)?.currency ||
     'ARS'
 
   if (checkingSession) {
@@ -1283,6 +1452,51 @@ export default function HomePage() {
 
                   {historyChart ? (
                     <div className="history-chart-shell">
+                      <div className="history-controls">
+                        <div className="history-filter-group">
+                          <div className="history-filter-label">Competidores visibles</div>
+                          <div className="history-filter-chips">
+                            <span className="history-filter-chip fixed">Mi publicación</span>
+                            {competitorSeries.map((series) => {
+                              const active = visibleCompetitorSeries.includes(series.key)
+                              return (
+                                <button
+                                  key={series.key}
+                                  type="button"
+                                  className={`history-filter-chip ${active ? 'is-active' : ''}`}
+                                  onClick={() =>
+                                    setVisibleCompetitorSeries((current) =>
+                                      current.includes(series.key)
+                                        ? current.filter((key) => key !== series.key)
+                                        : [...current, series.key],
+                                    )
+                                  }
+                                >
+                                  <span className="history-filter-swatch" style={{ backgroundColor: series.color }} />
+                                  {series.label}
+                                </button>
+                              )
+                            })}
+                          </div>
+                        </div>
+
+                        <div className="history-filter-group">
+                          <div className="history-filter-label">Lectura seleccionada</div>
+                          <div className="history-filter-chips">
+                            {historyChart.snapshots.map((snapshot) => (
+                              <button
+                                key={snapshot.key}
+                                type="button"
+                                className={`history-filter-chip ${selectedSnapshot?.key === snapshot.key ? 'is-active' : ''}`}
+                                onClick={() => setSelectedSnapshotKey(snapshot.key)}
+                              >
+                                {snapshot.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
                       <div className="history-chart-card">
                         <svg
                           className="history-chart"
@@ -1299,16 +1513,19 @@ export default function HomePage() {
                             const bottom = 44
                             const plotWidth = width - left - right
                             const plotHeight = height - top - bottom
-                            const lastIndex = Math.max(historyChart.snapshots.length - 1, 1)
+                            const lastIndex = Math.max(visibleHistoryChart?.snapshots.length ? visibleHistoryChart.snapshots.length - 1 : 1, 1)
                             const xFor = (index: number) => left + (plotWidth * index) / lastIndex
                             const yFor = (value: number) =>
                               top +
-                              ((historyChart.maxPrice - value) / (historyChart.maxPrice - historyChart.minPrice || 1)) *
+                              ((visibleHistoryChart!.maxPrice - value) / (visibleHistoryChart!.maxPrice - visibleHistoryChart!.minPrice || 1)) *
                                 plotHeight
+                            const selectedIndex = visibleHistoryChart?.snapshots.findIndex(
+                              (snapshot) => snapshot.key === selectedSnapshot?.key,
+                            ) ?? -1
 
                             return (
                               <>
-                                {historyChart.ticks.map((tick) => {
+                                {visibleHistoryChart?.ticks.map((tick) => {
                                   const y = yFor(tick)
                                   return (
                                     <g key={tick}>
@@ -1320,7 +1537,17 @@ export default function HomePage() {
                                   )
                                 })}
 
-                                {historyChart.snapshots.map((snapshot, index) => (
+                                {selectedIndex >= 0 ? (
+                                  <line
+                                    x1={xFor(selectedIndex)}
+                                    y1={top}
+                                    x2={xFor(selectedIndex)}
+                                    y2={height - bottom}
+                                    className="history-selected-line"
+                                  />
+                                ) : null}
+
+                                {visibleHistoryChart?.snapshots.map((snapshot, index) => (
                                   <text
                                     key={snapshot.key}
                                     x={xFor(index)}
@@ -1328,17 +1555,17 @@ export default function HomePage() {
                                     textAnchor={
                                       index === 0
                                         ? 'start'
-                                        : index === historyChart.snapshots.length - 1
+                                        : index === visibleHistoryChart.snapshots.length - 1
                                           ? 'end'
                                           : 'middle'
                                     }
-                                    className="history-axis-label x"
+                                    className={`history-axis-label x ${selectedSnapshot?.key === snapshot.key ? 'is-selected' : ''}`}
                                   >
                                     {snapshot.label}
                                   </text>
                                 ))}
 
-                                {historyChart.series.map((series) => (
+                                {visibleHistoryChart?.series.map((series) => (
                                   <g key={series.key}>
                                     <path
                                       d={svgLinePath(series.values, xFor, yFor)}
@@ -1354,7 +1581,7 @@ export default function HomePage() {
                                           key={`${series.key}-${index}`}
                                           cx={xFor(index)}
                                           cy={yFor(value)}
-                                          r="4.5"
+                                          r={selectedIndex === index ? '6' : '4.5'}
                                           fill={series.color}
                                           className="history-point"
                                         />
@@ -1369,7 +1596,7 @@ export default function HomePage() {
                       </div>
 
                       <div className="history-legend">
-                        {historyChart.series.map((series) => (
+                        {visibleHistoryChart?.series.map((series) => (
                           <div key={series.key} className={`history-legend-item ${series.role === 'mine' ? 'is-mine' : ''}`}>
                             <span className="history-legend-swatch" style={{ backgroundColor: series.color }} />
                             <div className="history-legend-copy">
@@ -1391,27 +1618,33 @@ export default function HomePage() {
 
                 {selected.lastResult ? (
                   <>
+                    <div className="history-selection-note">
+                      {selectedSnapshot
+                        ? `Viendo la lectura del ${prettyDate(selectedSnapshot.capturedAt)}`
+                        : 'Viendo la última lectura guardada'}
+                    </div>
+
                     <div className="stats-grid">
                       <div className="stat-card">
                         <div className="stat-label">Mi precio</div>
                         <div className="stat-value">
-                          {money(selected.lastResult.summary.minePrice, selected.lastResult.rows[0]?.currency)}
+                          {money(displayedSummary.minePrice, rows[0]?.currency)}
                         </div>
                       </div>
 
                       <div className="stat-card">
                         <div className="stat-label">Filas</div>
-                        <div className="stat-value">{selected.lastResult.summary.total}</div>
+                        <div className="stat-value">{displayedSummary.total}</div>
                       </div>
 
                       <div className="stat-card">
                         <div className="stat-label">Con datos</div>
-                        <div className="stat-value">{selected.lastResult.summary.ok}</div>
+                        <div className="stat-value">{displayedSummary.ok}</div>
                       </div>
 
                       <div className="stat-card">
                         <div className="stat-label">Fallidas</div>
-                        <div className="stat-value">{selected.lastResult.summary.failed}</div>
+                        <div className="stat-value">{displayedSummary.failed}</div>
                       </div>
                     </div>
 

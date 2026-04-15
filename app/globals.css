@@ -367,6 +367,68 @@ img {
   gap: 14px;
 }
 
+.history-controls {
+  display: grid;
+  gap: 12px;
+}
+
+.history-filter-group {
+  display: grid;
+  gap: 8px;
+}
+
+.history-filter-label {
+  font-size: 0.8rem;
+  font-weight: 800;
+  color: var(--text-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.history-filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.history-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.85);
+  color: var(--text-soft);
+  border-radius: 999px;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: 0.18s ease;
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.history-filter-chip:hover {
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+
+.history-filter-chip.is-active,
+.history-filter-chip.fixed {
+  background: var(--accent-soft);
+  border-color: rgba(47, 109, 246, 0.18);
+  color: var(--accent);
+}
+
+.history-filter-chip.fixed {
+  cursor: default;
+}
+
+.history-filter-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+}
+
 .history-chart-card {
   border: 1px solid var(--line);
   border-radius: 20px;
@@ -396,9 +458,19 @@ img {
   font-size: 11px;
 }
 
+.history-axis-label.x.is-selected {
+  fill: var(--accent);
+}
+
 .history-point {
   stroke: rgba(255, 255, 255, 0.95);
   stroke-width: 2;
+}
+
+.history-selected-line {
+  stroke: rgba(47, 109, 246, 0.2);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 5;
 }
 
 .history-legend {
@@ -449,6 +521,13 @@ img {
 
 .runs-empty {
   padding: 18px;
+}
+
+.history-selection-note {
+  margin: 0 22px 14px;
+  color: var(--text-soft);
+  font-size: 0.9rem;
+  font-weight: 700;
 }
 
 .main-grid {
