@@ -37,10 +37,6 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       my_name: body.myName?.trim() || 'Mi publicación',
       my_url: body.myUrl?.trim() || '',
       my_manual: body.myManual ?? emptyManual(),
-      last_result: body.lastResult ?? null,
-      sync_status: body.syncStatus ?? 'pending',
-      last_synced_at: body.lastSyncedAt ?? null,
-      sync_error: body.syncError ?? null,
       updated_at: new Date().toISOString(),
     }
 
