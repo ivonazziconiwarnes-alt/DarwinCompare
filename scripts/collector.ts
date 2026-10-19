@@ -5,7 +5,7 @@ import { runWebComparison } from '../lib/ml-web'
 import type { CompareResponse, SavedComparison } from '../lib/types'
 
 type ClaimPayload = {
-  run: { id: string } | null
+  run: { id: string; leaseToken: string } | null
   comparison: SavedComparison | null
   error?: string
 }
@@ -85,6 +85,7 @@ async function claimRun(baseUrl: string, headers: Record<string, string>) {
   const response = await fetch(`${baseUrl}/api/worker/runs/claim`, {
     method: 'POST',
     headers,
+    signal: AbortSignal.timeout(15_000),
   })
 
   const json = await readJson<ClaimPayload>(response)
@@ -99,6 +100,7 @@ async function completeRun(
   baseUrl: string,
   headers: Record<string, string>,
   runId: string,
+  leaseToken: string,
   payload: {
     status: 'ok' | 'error'
     error: string | null
@@ -108,7 +110,8 @@ async function completeRun(
   const response = await fetch(`${baseUrl}/api/worker/runs/${runId}/complete`, {
     method: 'POST',
     headers,
-    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(15_000),
+    body: JSON.stringify({ ...payload, leaseToken }),
   })
 
   const json = await readJson<{ error?: string }>(response)
@@ -125,20 +128,61 @@ async function processOne(baseUrl: string, workerId: string) {
   const runId = claimed.run.id
   const comparison = claimed.comparison
 
+  const leaseToken = claimed.run.leaseToken
+  if (!leaseToken) throw new Error('Servidor sin soporte de leases; actualizar antes de ejecutar.')
+  let leaseLost = false
+  let stopped = false
+  // Recursive timer avoids overlapping heartbeats when the network is slow.
+  let timer: ReturnType<typeof setTimeout> | undefined
+  async function heartbeat() {
+    try {
+      const response = await fetch(`${baseUrl}/api/worker/runs/${runId}/heartbeat`, {
+        method: 'POST', headers, body: JSON.stringify({ leaseToken }),
+        signal: AbortSignal.timeout(15_000),
+      })
+      if (response.status === 409) leaseLost = true
+      else if (!response.ok) console.error('collector: heartbeat HTTP', response.status)
+    } catch (error) {
+      console.error('collector: heartbeat fallido', error instanceof Error ? error.message : error)
+    }
+    if (!stopped && !leaseLost) timer = setTimeout(heartbeat, 30_000)
+  }
+  timer = setTimeout(heartbeat, 30_000)
   try {
-    const executed = await runWebComparison(comparison)
-    await completeRun(baseUrl, headers, runId, {
-      status: executed.status,
-      error: executed.error,
-      result: executed.result,
-    })
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'No se pudo ejecutar la comparacion.'
-    await completeRun(baseUrl, headers, runId, {
-      status: 'error',
-      error: message,
-      result: buildErrorResult(comparison, message),
-    })
+    // A hung browser must not keep renewing indefinitely. Restart this process after the hard deadline.
+    let deadline: ReturnType<typeof setTimeout> | undefined
+    let executed: Awaited<ReturnType<typeof runWebComparison>>
+    try {
+      executed = await Promise.race([
+        runWebComparison(comparison),
+        new Promise<never>((_, reject) => {
+          deadline = setTimeout(() => reject(new Error('COLLECTOR_HARD_TIMEOUT')), 19 * 60_000)
+        }),
+      ])
+    } catch (error) {
+      if (error instanceof Error && error.message === 'COLLECTOR_HARD_TIMEOUT') {
+        console.error('collector: tiempo maximo; reiniciar con supervisor')
+        process.exit(1)
+      }
+      const message = error instanceof Error ? error.message : 'No se pudo ejecutar la comparacion.'
+      executed = { status: 'error', error: message, result: buildErrorResult(comparison, message) }
+    } finally {
+      if (deadline) clearTimeout(deadline)
+    }
+    if (leaseLost) return true
+    // Keep the same payload on transport failure: never turn an uncertain success into an error.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        await completeRun(baseUrl, headers, runId, leaseToken, executed)
+        break
+      } catch (error) {
+        if (attempt === 2) throw error
+        await sleep(1000 * (attempt + 1))
+      }
+    }
+  } finally {
+    stopped = true
+    if (timer) clearTimeout(timer)
   }
 
   return true

@@ -647,7 +647,7 @@ export default function HomePage() {
   }, [loggedIn, selectedId])
 
   useEffect(() => {
-    if (!loggedIn || !selectedId || !selected || selected.syncStatus !== 'running') return
+    if (!loggedIn || !selectedId || !selected || !['pending', 'running'].includes(selected.syncStatus)) return
 
     const timer = window.setInterval(() => {
       void loadComparisons(selectedId)

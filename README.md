@@ -103,3 +103,9 @@ El collector:
 ```bash
 npm run build
 ```
+
+## Recuperación de corridas
+
+Antes de desplegar servidor/collector nuevos, aplicar `supabase/run-recovery.sql`.
+Consultar [protocolo, instalación y verificaciones](docs/run-recovery.md).
+`npm run collector` incluye reinicio automático; `npm test` verifica recuperación e historial en PostgreSQL embebido.
